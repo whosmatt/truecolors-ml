@@ -1,0 +1,3 @@
+[submodule "truecolors"]
+	path = truecolors
+	url = https://github.com/whosmatt/truecolors.git

@@ -1,0 +1,14 @@
+frontend/build/
+__pycache__/
+*.pyc
+.venv/
+
+# Datasets, caches and training output never go in git.
+data/
+cache/
+runs/
+checkpoints/
+*.wav
+*.npy
+*.npz
+*.tflite

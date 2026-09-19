@@ -32,10 +32,10 @@ The main weakness here is the poor timing accuracy and sensitivity. The autocorr
 ### ML kick/snare classifier and autocorrelation
 
 WIP  
-Same as above but with an ML classifier.
-A much bigger dataset is planned by using Ableton Live's classifier as a teacher model.
-
-Start with [HANDOFF.md](HANDOFF.md).
+Similar to above but with an ML classifier.
+Training corpus comes from my full sample library, ground truth from Ableton Live's built-in classifier.  
+After careful filtering, this leaves 8661 kicks, 12290 snares/claps/rims/snaps, 5169 hats, 6668 drum loops of which 985 have matching midi for full tagging.  
+Snares/claps/rims/snaps can be separated into individual classes but there is some overlap between them, especially snares and claps.
 
 ## Setup
 

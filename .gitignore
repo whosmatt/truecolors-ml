@@ -12,3 +12,4 @@ checkpoints/
 *.npy
 *.npz
 *.tflite
+runs/

@@ -10,7 +10,7 @@ featurised once per supported setting and the notch is carried as an input.
 
 import numpy as np
 
-from frontend.fe import BLOCK_SAMPLES, DTYPE, SPEC_VERSION, Frontend
+from frontend.fe import BLOCK_SAMPLES, DTYPE, SPEC_VERSION, Frontend, variant_name
 
 # The flattening order below is part of the model contract: it goes into
 # model_meta.json as feature_order and the firmware must fill its input tensor
@@ -43,8 +43,10 @@ def flatten(blocks: np.ndarray) -> np.ndarray:
     return out
 
 
-def featurise(pcm16: np.ndarray, notch_hz: int) -> np.ndarray:
-    fe = Frontend(notch_hz=notch_hz)
+def featurise(
+    pcm16: np.ndarray, notch_hz: int, comb: bool = True, hicut: bool = True
+) -> np.ndarray:
+    fe = Frontend(notch_hz=notch_hz, comb=comb, hicut=hicut)
     return flatten(fe.run(pcm16))
 
 
@@ -70,10 +72,17 @@ def label_blocks(
     return hit, off
 
 
-def spec() -> dict:
-    """Provenance for model_meta.json."""
+def spec(comb: bool = True, hicut: bool = True) -> dict:
+    """Provenance for model_meta.json.
+
+    `fe_variant` is as load-bearing as `fe_spec_version`: a model trained against
+    one filter variant is invalid against another, and the mismatch is silent.
+    """
+    mask = Frontend(comb=comb, hicut=hicut).variant
     return {
         "fe_spec_version": SPEC_VERSION,
+        "fe_variant": mask,
+        "fe_variant_name": variant_name(mask),
         "feature_order": list(FEATURE_ORDER),
         "block_samples": BLOCK_SAMPLES,
         "notch_hz": list(NOTCH_HZ),

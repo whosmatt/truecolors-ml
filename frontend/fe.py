@@ -30,14 +30,17 @@ def truecolors_root() -> Path:
     )
 
 
-def _build(root: Path) -> Path:
+def _build(root: Path, defines: tuple[str, ...] = ()) -> Path:
+    """Build one filter variant. Each gets its own .so, keyed by its defines."""
     src = [root / "components/audio/frontend.c", _HERE / "shim.c"]
     inc = root / "components/audio/include"
-    out = _HERE / "build" / "libfe.so"
+    tag = "".join("_" + d.lower().replace("fe_no_", "no") for d in sorted(defines))
+    out = _HERE / "build" / f"libfe{tag}.so"
     out.parent.mkdir(exist_ok=True)
     if not out.exists() or out.stat().st_mtime < max(s.stat().st_mtime for s in src):
         subprocess.run(
             ["cc", "-O2", "-fPIC", "-shared", "-std=c99", f"-I{inc}",
+             *[f"-D{d}" for d in defines],
              *[str(s) for s in src], "-lm", "-o", str(out)],
             check=True,
         )
@@ -45,15 +48,38 @@ def _build(root: Path) -> Path:
 
 
 def _header_consts(root: Path) -> dict:
+    """FE_* defines: plain integers and (1u << n) bit flags."""
     txt = (root / "components/audio/include/frontend.h").read_text()
-    return {
+    out = {
         m.group(1): int(m.group(2))
         for m in re.finditer(r"#define\s+(FE_\w+)\s+(\d+)\b", txt)
     }
+    out.update(
+        {
+            m.group(1): 1 << int(m.group(2))
+            for m in re.finditer(r"#define\s+(FE_\w+)\s+\(1u?\s*<<\s*(\d+)\)", txt)
+        }
+    )
+    return out
+
+
+def _load(defines: tuple[str, ...] = ()) -> ctypes.CDLL:
+    lib = ctypes.CDLL(str(_build(_ROOT, defines)))
+    for fn in ("fe_state_size", "fe_out_size"):
+        getattr(lib, fn).restype = ctypes.c_size_t
+    for fn in ("fe_spec_version", "fe_block_samples", "fe_sample_rate"):
+        getattr(lib, fn).restype = ctypes.c_int
+    lib.fe_variant.restype = ctypes.c_uint32
+    lib.fe_init.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    lib.fe_set_notch_hz.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    lib.fe_run.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+    return lib
 
 
 _ROOT = truecolors_root()
-_LIB = ctypes.CDLL(str(_build(_ROOT)))
+_LIBS: dict[tuple[str, ...], ctypes.CDLL] = {}
+_LIB = _load()
+_LIBS[()] = _LIB
 _C = _header_consts(_ROOT)
 
 SPEC_VERSION = _C["FE_SPEC_VERSION"]
@@ -73,30 +99,42 @@ DTYPE = np.dtype([
     ("spl_db", "<f4"),
 ])
 
-for _fn in ("fe_state_size", "fe_out_size"):
-    getattr(_LIB, _fn).restype = ctypes.c_size_t
-for _fn in ("fe_spec_version", "fe_block_samples", "fe_sample_rate"):
-    getattr(_LIB, _fn).restype = ctypes.c_int
-
 assert _LIB.fe_out_size() == DTYPE.itemsize, "fe_out_t layout changed, fix DTYPE"
 assert _LIB.fe_spec_version() == SPEC_VERSION
 assert _LIB.fe_block_samples() == BLOCK_SAMPLES
 assert _LIB.fe_sample_rate() == SAMPLE_RATE
 
-_LIB.fe_init.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-_LIB.fe_set_notch_hz.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-_LIB.fe_run.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+VARIANT_COMB = _C["FE_VARIANT_COMB"]
+VARIANT_HICUT = _C["FE_VARIANT_HICUT"]
+
+
+def variant_name(mask: int) -> str:
+    on = [n for n, b in (("comb", VARIANT_COMB), ("hicut", VARIANT_HICUT)) if mask & b]
+    return "+".join(on) if on else "none"
 
 
 class Frontend:
-    """One front-end instance. Stateful across run() calls"""
+    """One front-end instance. Stateful across run() calls.
 
-    def __init__(self, notch_hz: int = 480):
-        self._st = ctypes.create_string_buffer(_LIB.fe_state_size())
-        _LIB.fe_init(self._st, notch_hz)
+    `comb` and `hicut` select a filter variant, compiled from the same firmware
+    source with -DFE_NO_COMB / -DFE_NO_HICUT. The variant mask must be recorded
+    alongside fe_spec_version: a model trained against one variant is not valid
+    against another, and the mismatch is silent.
+    """
+
+    def __init__(self, notch_hz: int = 480, comb: bool = True, hicut: bool = True):
+        defines = tuple(
+            d for d, on in (("FE_NO_COMB", comb), ("FE_NO_HICUT", hicut)) if not on
+        )
+        if defines not in _LIBS:
+            _LIBS[defines] = _load(defines)
+        self._lib = _LIBS[defines]
+        self.variant = int(self._lib.fe_variant())
+        self._st = ctypes.create_string_buffer(self._lib.fe_state_size())
+        self._lib.fe_init(self._st, notch_hz)
 
     def set_notch_hz(self, hz: int):
-        _LIB.fe_set_notch_hz(self._st, hz)
+        self._lib.fe_set_notch_hz(self._st, hz)
 
     def run(self, samples: np.ndarray) -> np.ndarray:
         """int16 mono at SAMPLE_RATE -> (n_blocks,) structured array of features.
@@ -108,5 +146,5 @@ class Frontend:
         n = samples.size // BLOCK_SAMPLES
         out = np.zeros(n, dtype=DTYPE)
         if n:
-            _LIB.fe_run(self._st, samples.ctypes.data, n, out.ctypes.data)
+            self._lib.fe_run(self._st, samples.ctypes.data, n, out.ctypes.data)
         return out

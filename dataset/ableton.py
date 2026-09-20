@@ -6,6 +6,7 @@ DB access READ ONLY
 import base64
 import os
 import re
+import shutil
 import sqlite3
 import struct
 import urllib.parse
@@ -62,9 +63,41 @@ DETECTION_CLASSES = ("kick", "snare", "hihat")
 KIND_TAGS = {"one_shot": ("Type|One Shot",), "loop": ("Type|Loop", "Drums|Drum Loop")}
 
 
+LOCAL_COPY = Path("cache/live-index")
+
+
 def connect(path: Path = DB_PATH) -> sqlite3.Connection:
+    """Read-only handle, with a local copy when Live has the index open.
+
+    Live keeps the database in WAL mode. While it is running there are `-wal` and
+    `-shm` files, and SQLite needs shared-memory locking to read them — which
+    drvfs does not provide, so the open fails with "disk I/O error". Copying the
+    database and its WAL to ext4 and opening that gives a consistent view without
+    touching Live's files.
+    """
     uri = "file:" + urllib.parse.quote(str(path)) + "?mode=ro"
-    return sqlite3.connect(uri, uri=True, check_same_thread=False)
+    try:
+        con = sqlite3.connect(uri, uri=True, check_same_thread=False)
+        con.execute("select count(*) from sqlite_master").fetchone()
+        return con
+    except sqlite3.Error:
+        pass
+
+    path = Path(path)
+    LOCAL_COPY.mkdir(parents=True, exist_ok=True)
+    local = LOCAL_COPY / path.name
+    src = [path] + [p for p in (path.with_name(path.name + "-wal"),) if p.exists()]
+    stamp = tuple((p.stat().st_size, int(p.stat().st_mtime)) for p in src)
+    marker = local.with_suffix(".stamp")
+    cached = marker.read_text() if marker.exists() else ""
+    if not local.exists() or cached != repr(stamp):
+        for p in src:
+            shutil.copy2(p, LOCAL_COPY / p.name)
+        marker.write_text(repr(stamp))
+    con = sqlite3.connect(str(local), check_same_thread=False)
+    con.execute("pragma query_only = 1")
+    con.execute("select count(*) from sqlite_master").fetchone()
+    return con
 
 
 class Library:
@@ -132,6 +165,22 @@ class Library:
         out = set()
         for tag in KIND_TAGS[kind]:
             out |= self.tagged(tag)
+        return out
+
+    def families(self) -> dict[int, set[str]]:
+        """file_id -> top-level tag families ({"Drums", "Sounds", "Type", ...}).
+
+        A loop with no drum *class* tag is not necessarily drum-free: most music
+        loops contain drums and simply were not classified as one. The family set
+        is what distinguishes genuinely melodic material.
+        """
+        out: dict[int, set[str]] = {}
+        for fid, value in self._q(
+            f"""select m.file_id, v.value from metadata m
+                join metadata_values v on v.id = m.value_id
+                where m.key in ({KEY_KEYW}, {KEY_CKEY})"""
+        ):
+            out.setdefault(fid, set()).add(value.split("|", 1)[0])
         return out
 
     def embeddings(self) -> dict[int, bytes]:

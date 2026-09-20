@@ -12,6 +12,7 @@ tempo-matched backing loop.
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -73,6 +74,7 @@ class Kit:
             int.from_bytes(hashlib.sha256(seed.encode()).digest()[:8], "little")
         )
         self._by_pad: dict[tuple[str, int], np.ndarray | None] = {}
+        self.chosen: dict[tuple[str, int], str] = {}  # which file voiced each pad
 
     def voice(self, cls: str, midi: int) -> np.ndarray | None:
         key = (cls, midi)
@@ -85,6 +87,7 @@ class Kit:
                 row = pool[int(self.rng.integers(len(pool)))]
                 audio = _load(row["path"])
                 if audio is not None:
+                    self.chosen[key] = row["name"]
                     break
             self._by_pad[key] = audio
         return self._by_pad[key]
@@ -167,13 +170,58 @@ def pools_from_manifest(path: str) -> dict[str, list[dict]]:
     return pools
 
 
+# Packs with a lot of clean melody loops carrying bass and varied instruments,
+# chosen by ear. Ableton's tags over-report drums rather than under-report them,
+# so a Drums tag of any kind is a reliable exclusion — not just "Drum Loop", but
+# Kick, Snare and the rest. Auditioning the untargeted pool showed why both
+# filters are needed: a "Vocal Chop Loop" and a "Songstarter Drop" both carried
+# percussive attacks the model read as kicks.
+BACKING_PACKS = (
+    ("kmrbi", "melody", "loop"),
+    ("kmrebi", "melody", "loop"),
+    ("kmrbi", "songstarter"),
+    ("laxcity", "melody"),
+)
+
+
+def _tokens(name: str) -> set[str]:
+    return {t for t in re.split(r"[^0-9a-z]+", name.lower()) if t}
+
+
+def matches_pack(path: str, packs=BACKING_PACKS) -> bool:
+    """All words present, any order, separators ignored.
+
+    Matched against the last folders plus the filename, not the filename alone:
+    these packs put the qualifier in the folder (`LAXCITY_melody_loops`) while
+    the files are named `MDSN_LXCTY_vocal_loop_...`.
+    """
+    toks = _tokens("/".join(path.rsplit("/", 3)[1:]))
+    return any(all(w in toks for w in pack) for pack in packs)
+
+
 def backing_pool(path: str) -> dict[int, list[dict]]:
-    """Loops with a verified tempo, indexed by BPM, for tempo-matched beds."""
+    """Melodic loops with a verified tempo, indexed by BPM, for tempo-matched beds.
+
+    Must be genuinely drum-free. An untagged loop is not: measured on a fixed
+    model, beds drawn from untagged loops dropped kick precision from 0.775 to
+    0.604 and snare precision from 0.810 to 0.550, because they carry their own
+    unlabelled drum hits which the model correctly detects and the metric counts
+    as false positives.
+    """
     out: dict[int, list[dict]] = {}
     with open(path) as fh:
         fh.readline()
         for line in fh:
             r = json.loads(line)
-            if r["kind"] == "loop" and r.get("bpm") and r.get("readable") and not r["class"]:
+            fam = set(r.get("families") or ())
+            if (
+                r["kind"] == "loop"
+                and r.get("bpm")
+                and r.get("readable")
+                and not r["class"]
+                and "Sounds" in fam
+                and "Drums" not in fam
+                and matches_pack(r["path"])
+            ):
                 out.setdefault(int(r["bpm"]), []).append(r)
     return out

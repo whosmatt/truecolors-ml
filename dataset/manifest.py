@@ -50,6 +50,7 @@ def _cache_key(path: str) -> str | None:
 def build(out_path: Path, *, limit: int | None, workers: int, no_embedding: bool):
     lib = Library()
     emb = {} if no_embedding else lib.embeddings()
+    fams = lib.families()
     one_shots, loops = lib.kind_members("one_shot"), lib.kind_members("loop")
 
     rows = {}
@@ -122,6 +123,7 @@ def build(out_path: Path, *, limit: int | None, workers: int, no_embedding: bool
                 counts["with_bpm"] += bool(t)
             if r.get("discard"):
                 counts["discarded"] += 1
+            r["families"] = sorted(fams.get(fid, ()))
             if fid in emb:
                 r["embedding"] = b64(emb[fid])
             body.append(r)

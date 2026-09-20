@@ -43,6 +43,10 @@ def main():
     ap.add_argument("--no-augment", action="store_true",
                     help="skip the IR and whine; dry renders only")
     ap.add_argument("--ir", type=Path, default=augment.IR_PATH)
+    ap.add_argument("--no-comb", action="store_true", help="build without the coil-whine comb")
+    ap.add_argument("--no-hicut", action="store_true", help="build without the 4 kHz hi-cut")
+    ap.add_argument("--laser-off", action="store_true",
+                    help="inject the quiet mic floor instead of coil whine")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
 
@@ -95,9 +99,9 @@ def main():
                 pcm = r.to_int16(dbfs)
             else:
                 # Coil whine for this PWM setting, at its measured absolute level.
-                y = augment.finish(wet, notch, rng, dbfs=dbfs)
+                y = augment.finish(wet, None if a.laser_off else notch, rng, dbfs=dbfs)
                 pcm = (y * 32767.0).astype(np.int16)
-            X = features.featurise(pcm, notch)
+            X = features.featurise(pcm, notch, comb=not a.no_comb, hicut=not a.no_hicut)
             y, off = features.label_blocks(
                 len(X), r.onsets, r.classes, len(DETECTION_CLASSES)
             )
@@ -128,10 +132,11 @@ def main():
         "agc_settle_s": render.AGC_SETTLE_S,
         "level_dbfs": list(render.LEVEL_DBFS),
         "augmented": not a.no_augment,
+        "laser_off": a.laser_off,
         "ir": None if a.no_augment else str(a.ir),
         "ir_sha256": None if a.no_augment or not a.ir.exists()
                      else hashlib.sha256(a.ir.read_bytes()).hexdigest(),
-        **features.spec(),
+        **features.spec(comb=not a.no_comb, hicut=not a.no_hicut),
     }
     for s, _ in SPLITS:
         d = acc[s]

@@ -11,6 +11,7 @@ then put through the same IR and coil-whine chain as the training corpus.
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import soundfile as sf
@@ -58,7 +59,7 @@ def autocorr(x: np.ndarray) -> np.ndarray:
     return ac / np.maximum(counts, 1)
 
 
-def estimate(act: np.ndarray) -> Estimate:
+def estimate(act: np.ndarray, prior=None) -> Estimate:
     """Period and phase from an activation series.
 
     Period comes from the autocorrelation peak inside the tempo range. Phase then
@@ -82,6 +83,12 @@ def estimate(act: np.ndarray) -> Estimate:
     score = interp(grid).astype(np.float64)
     for k, w in ((2, 0.5), (3, 1 / 3)):
         score = score + w * np.where(grid * k < len(ac) - 1, interp(grid * k), 0.0)
+
+    if prior is not None:
+        # Weight each candidate by how plausible its tempo is. This is what
+        # resolves the octave: 58 and 116 BPM explain a pulse train equally well,
+        # and only the prior distinguishes them.
+        score = score * prior_weight(60.0 * BLOCK_HZ / grid, prior)
 
     best = float(score.max())
     if best <= 0:
@@ -202,3 +209,53 @@ def test_loops(manifest: str, n: int, seed: int = 0) -> list[dict]:
     rng = np.random.default_rng(seed)
     idx = rng.choice(len(rows), size=min(n, len(rows)), replace=False)
     return [rows[i] for i in sorted(idx)]
+
+
+# --- tempo prior -------------------------------------------------------------
+# Octave errors are not uniformly plausible: an estimate of 58 BPM is usually a
+# halved 116, because little real music sits at 58. The prior is measured from
+# the training clips' own tempo distribution rather than assumed, and applied in
+# log-tempo so that doubling and halving are symmetric.
+
+_PRIOR_CACHE: dict = {}
+
+
+def build_prior(bpms, sigma_octaves: float = 0.12, grid: int = 512):
+    """-> (log2 bpm grid, weight), normalised to peak 1."""
+    b = np.asarray([x for x in bpms if BPM_RANGE[0] <= x <= BPM_RANGE[1]], dtype=float)
+    lo, hi = np.log2(BPM_RANGE[0]), np.log2(BPM_RANGE[1])
+    xs = np.linspace(lo, hi, grid)
+    w = np.zeros_like(xs)
+    for v in np.log2(b):
+        w += np.exp(-0.5 * ((xs - v) / sigma_octaves) ** 2)
+    if w.max() > 0:
+        w /= w.max()
+    return xs, w + 1e-3  # floor so an unusual tempo is unlikely, not impossible
+
+
+def training_prior(features_dir="data/features"):
+    """Tempo prior from the training split's clips, cached."""
+    key = str(features_dir)
+    if key not in _PRIOR_CACHE:
+        import numpy as _np
+
+        from . import data as _data
+        from . import evaluate as _ev
+        tr = _data.load(Path(features_dir), "train") if False else None
+        d = _np.load(f"{features_dir}/train.npz")
+        beat, off, take = d["beat"], d["beat_off"], d["take"]
+        bpms = []
+        for t in _np.unique(take):
+            m = take == t
+            idx = _np.flatnonzero(beat[m][:, 0] > 0)
+            if len(idx) < 8:
+                continue
+            bt = (idx + off[m][idx, 0]) * (512 / 48000 * 1000)
+            bpms.append(60000.0 / float(_np.median(_np.diff(bt))))
+        _PRIOR_CACHE[key] = build_prior(bpms)
+    return _PRIOR_CACHE[key]
+
+
+def prior_weight(bpm, prior) -> np.ndarray:
+    xs, w = prior
+    return np.interp(np.log2(np.clip(bpm, 1e-6, None)), xs, w, left=w[0], right=w[-1])

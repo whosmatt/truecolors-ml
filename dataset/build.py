@@ -39,6 +39,8 @@ def main():
     ap.add_argument("--out", type=Path, default=Path("data/features"))
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--seconds", type=float, default=render.AGC_SETTLE_S + render.KEEP_S)
+    ap.add_argument("--repeats", type=int, default=1,
+                    help="renders per clip, each with a different kit")
     ap.add_argument("--no-backing", action="store_true")
     ap.add_argument("--no-augment", action="store_true",
                     help="skip the IR and whine; dry renders only")
@@ -71,73 +73,71 @@ def main():
             skipped += 1
             continue
         split = split_of(clip.name)
-        kit = render.Kit(pools, seed=clip.name)
+        for rep in range(a.repeats):
+            # A fresh kit and bed per repeat: the same groove voiced by different
+            # drums is the cheapest source of variety, and the model overfits
+            # (train beat-loss 0.45 against 0.58 val) well before it runs out of
+            # compute budget.
+            kit = render.Kit(pools, seed=f"{clip.name}#{rep}")
+            rng = np.random.default_rng(fid + 7919 * rep)
 
-        bed = None
-        cands = beds.get(int(round(clip.tempo)), [])
-        if cands:
-            row = cands[int(np.random.default_rng(fid).integers(len(cands)))]
-            if row["path"] not in bed_cache:
-                if len(bed_cache) > 64:  # beds are ~1.5 MB each; keep a small pool
-                    bed_cache.clear()
-                loaded = render._load(row["path"])
-                bed_cache[row["path"]] = loaded if loaded is not None else np.zeros(0, np.float32)
-            if bed_cache[row["path"]].size:
-                bed = (bed_cache[row["path"]], row["name"])
+            bed = None
+            cands = beds.get(int(round(clip.tempo)), [])
+            if cands:
+                row = cands[int(rng.integers(len(cands)))]
+                if row["path"] not in bed_cache:
+                    if len(bed_cache) > 64:  # beds are ~1.5 MB each
+                        bed_cache.clear()
+                    loaded = render._load(row["path"])
+                    bed_cache[row["path"]] = (loaded if loaded is not None
+                                              else np.zeros(0, np.float32))
+                if bed_cache[row["path"]].size:
+                    bed = (bed_cache[row["path"]], row["name"])
 
-        rng = np.random.default_rng(fid)
-        # One render, featurised once per notch: the audio is identical across
-        # notch settings, only the front end's comb differs.
-        r = render.render(
-            clip, kit, classes=DETECTION_CLASSES, backing=bed, min_seconds=a.seconds
-        )
-        # Convolution is linear and notch-independent, so it happens once per
-        # clip rather than once per take.
-        wet = None if a.no_augment else augment.apply_ir(r.audio)
-        for notch in features.NOTCH_HZ:
-            dbfs = float(rng.uniform(*render.LEVEL_DBFS))
-            if a.no_augment:
-                pcm = r.to_int16(dbfs)
-            else:
-                # Coil whine for this PWM setting, at its measured absolute level.
-                y = augment.finish(wet, None if a.laser_off else notch, rng, dbfs=dbfs)
-                pcm = (y * 32767.0).astype(np.int16)
-            X = features.featurise(pcm, notch, comb=not a.no_comb, hicut=not a.no_hicut)
-            y, off = features.label_blocks(
-                len(X), r.onsets, r.classes, len(DETECTION_CLASSES)
-            )
-            # Beat grid, exact: the clip's MIDI puts beat 0 at its start and the
-            # take is whole repeats of the clip, so beats run at 60/tempo
-            # throughout. This is the supervision approach 2 needs — deriving it
-            # from real loops instead gives 20 ms median error and 17% off-beat
-            # locks, measured against these same clips.
-            beat_s = 60.0 / clip.tempo
-            n_beats = len(X) * BLOCK_SAMPLES / SR / beat_s
-            bt = np.arange(int(n_beats) + 1) * beat_s * SR
-            beat, beat_off = features.label_blocks(
-                len(X), bt.astype(np.int64), np.zeros(len(bt), dtype=np.int8), 1
-            )
-            # Explicit "nothing here" channel. Without it the only negative
-            # signal is the absence of a positive, and the confusion matrix
-            # showed the surplus landing on hihat.
-            none = (y.sum(axis=1, keepdims=True) == 0).astype(np.float32)
-            y = np.concatenate([y, none], axis=1)
-            # Drop the settle window: the AGC has not converged there, so those
-            # blocks do not look like anything the device would see in steady state.
-            skip = int(render.AGC_SETTLE_S * SR / BLOCK_SAMPLES)
-            X, y, off = X[skip:], y[skip:], off[skip:]
-            beat, beat_off = beat[skip:], beat_off[skip:]
-            if not len(X):
-                continue
-            d = acc[split]
-            d["X"].append(X)
-            d["y"].append(y)
-            d["off"].append(off)
-            d["beat"].append(beat)
-            d["beat_off"].append(beat_off)
-            d["take"].append(np.full(len(X), takes, dtype=np.int32))
-            d["notch"].append(np.full(len(X), notch, dtype=np.int16))
-            takes += 1
+            r = render.render(clip, kit, classes=DETECTION_CLASSES, backing=bed,
+                              min_seconds=a.seconds)
+            # Convolution is linear and notch-independent: once per render.
+            wet = None if a.no_augment else augment.apply_ir(r.audio)
+            for notch in features.NOTCH_HZ:
+                dbfs = float(rng.uniform(*render.LEVEL_DBFS))
+                if a.no_augment:
+                    pcm = r.to_int16(dbfs)
+                else:
+                    y = augment.finish(wet, None if a.laser_off else notch, rng, dbfs=dbfs)
+                    pcm = (y * 32767.0).astype(np.int16)
+                X = features.featurise(pcm, notch, comb=not a.no_comb, hicut=not a.no_hicut)
+                y, off = features.label_blocks(
+                    len(X), r.onsets, r.classes, len(DETECTION_CLASSES)
+                )
+                # Beat grid, exact: the clip's MIDI puts beat 0 at its start and
+                # the take is whole repeats of the clip, so beats run at 60/tempo
+                # throughout. Deriving it from real loops instead gives 20 ms
+                # median error and 17% off-beat locks.
+                beat_s = 60.0 / clip.tempo
+                n_beats = len(X) * BLOCK_SAMPLES / SR / beat_s
+                bt = np.arange(int(n_beats) + 1) * beat_s * SR
+                beat, beat_off = features.label_blocks(
+                    len(X), bt.astype(np.int64), np.zeros(len(bt), dtype=np.int8), 1
+                )
+                # Explicit "nothing here" channel: without it the only negative
+                # signal is the absence of a positive.
+                none = (y.sum(axis=1, keepdims=True) == 0).astype(np.float32)
+                y = np.concatenate([y, none], axis=1)
+                # Drop the settle window: the AGC has not converged there.
+                skip = int(render.AGC_SETTLE_S * SR / BLOCK_SAMPLES)
+                X, y, off = X[skip:], y[skip:], off[skip:]
+                beat, beat_off = beat[skip:], beat_off[skip:]
+                if not len(X):
+                    continue
+                d = acc[split]
+                d["X"].append(X)
+                d["y"].append(y)
+                d["off"].append(off)
+                d["beat"].append(beat)
+                d["beat_off"].append(beat_off)
+                d["take"].append(np.full(len(X), takes, dtype=np.int32))
+                d["notch"].append(np.full(len(X), notch, dtype=np.int16))
+                takes += 1
         if (i + 1) % 100 == 0:
             print(f"  {i+1}/{len(ids)} clips  {takes} takes  {time.time()-t0:.0f}s", flush=True)
 
@@ -149,6 +149,7 @@ def main():
         "takes": takes,
         "clips_skipped": skipped,
         "seconds_per_take": a.seconds,
+        "repeats": a.repeats,
         "backing": not a.no_backing,
         "agc_settle_s": render.AGC_SETTLE_S,
         "level_dbfs": list(render.LEVEL_DBFS),

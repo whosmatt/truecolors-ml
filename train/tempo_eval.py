@@ -7,6 +7,8 @@ import argparse
 import json
 from pathlib import Path
 
+from . import gpu  # noqa: F401  must precede keras
+
 import keras
 import numpy as np
 

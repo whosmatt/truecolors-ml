@@ -16,6 +16,8 @@ import json
 import time
 from pathlib import Path
 
+from . import gpu  # noqa: F401  must precede keras
+
 import keras
 import numpy as np
 
@@ -23,7 +25,7 @@ from . import data, evaluate, tempo
 from . import model as model_mod
 
 
-def build(n_input: int, hidden, aux: bool, dropout: float = 0.1) -> keras.Model:
+def build(n_input: int, hidden, aux: bool, dropout: float = 0.1, n_aux: int = 3) -> keras.Model:
     inp = keras.Input(shape=(n_input,), name="features")
     x = inp
     for i, h in enumerate(hidden):
@@ -37,7 +39,7 @@ def build(n_input: int, hidden, aux: bool, dropout: float = 0.1) -> keras.Model:
     if aux:
         # Drum classes as an auxiliary task: free supervision from the same
         # takes, and a beat is usually a drum hit, so the features overlap.
-        outs["hit"] = keras.layers.Dense(3, activation="sigmoid", name="hit")(x)
+        outs["hit"] = keras.layers.Dense(n_aux, activation="sigmoid", name="hit")(x)
     return keras.Model(inp, outs, name="grid")
 
 
@@ -106,12 +108,14 @@ def main():
     mean, scale = data.normaliser(tr)
     targets = ("beat", "beat_offset") + (() if a.no_aux else ("hit",))
 
-    m = build(data.WINDOW * len(meta["feature_order"]), tuple(a.hidden), not a.no_aux)
+    m = build(data.WINDOW * len(meta["feature_order"]), tuple(a.hidden),
+              not a.no_aux, n_aux=tr.y.shape[1])
     losses = {"beat": model_mod.weighted_bce(a.pos_weight),
               "beat_offset": model_mod.masked_mse}
     weights = {"beat": 1.0, "beat_offset": 5.0}
     if not a.no_aux:
-        losses["hit"] = model_mod.weighted_bce(a.pos_weight)
+        pw = [a.pos_weight] * 3 + [1.0] * (tr.y.shape[1] - 3)
+        losses["hit"] = model_mod.weighted_bce(pw if tr.y.shape[1] > 3 else a.pos_weight)
         weights["hit"] = 0.3
     m.compile(optimizer=keras.optimizers.Adam(a.lr), loss=losses, loss_weights=weights)
     print(f"window {data.WINDOW} blocks ({data.WINDOW*evaluate.BLOCK_MS:.0f} ms) | "

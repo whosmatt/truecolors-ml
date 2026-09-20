@@ -29,8 +29,9 @@ class Split:
     off: np.ndarray     # (N, C) position within the block, [0, 1)
     take: np.ndarray    # (N,) take id
     centres: np.ndarray # indices with a full window inside one take
-    beat: np.ndarray | None = None      # (N, 1) beat grid, exact
+    beat: np.ndarray | None = None      # (N, 1) beat grid, exact; -1 = masked
     beat_off: np.ndarray | None = None  # (N, 1) sub-block position
+    period: np.ndarray | None = None    # (N, 1) beat period in blocks
 
     def __len__(self) -> int:
         return len(self.centres)
@@ -46,7 +47,8 @@ def load(path: Path, split: str, past: int = PAST, future: int = FUTURE) -> Spli
     ok[past : n - future] &= take[: n - past - future] == take[past + future :]
     return Split(X, y, off, take, np.flatnonzero(ok).astype(np.int64),
                  d["beat"] if "beat" in d.files else None,
-                 d["beat_off"] if "beat_off" in d.files else None)
+                 d["beat_off"] if "beat_off" in d.files else None,
+                 d["period"] if "period" in d.files else None)
 
 
 def normaliser(s: Split) -> tuple[np.ndarray, np.ndarray]:
@@ -119,3 +121,47 @@ class Windows(keras.utils.PyDataset):
 
 def meta(path: Path) -> dict:
     return json.loads((Path(path) / "meta.json").read_text())
+
+
+def period_from_beats(s: Split) -> np.ndarray:
+    """Per-take beat period in blocks, read off exact beat labels."""
+    out = np.zeros((len(s.X), 1), dtype=np.float32)
+    for t in np.unique(s.take):
+        m = s.take == t
+        idx = np.flatnonzero(s.beat[m][:, 0] > 0)
+        if len(idx) < 4:
+            out[m] = -1.0
+            continue
+        pos = idx + s.beat_off[m][idx, 0]
+        out[m] = float(np.median(np.diff(pos)))
+    return out
+
+
+def load_many(dirs, split: str, past: int = PAST, future: int = FUTURE) -> Split:
+    """Merge corpora, keeping take ids unique.
+
+    Corpora without a period column get one derived from their beat labels;
+    corpora without beat labels carry -1 and are masked out of those losses.
+    """
+    parts, base = [], 0
+    for d in dirs:
+        s = load(Path(d), split, past, future)
+        if s.period is None:
+            s.period = period_from_beats(s) if s.beat is not None else np.full(
+                (len(s.X), 1), -1.0, dtype=np.float32)
+        s.take = s.take + base
+        base = int(s.take.max()) + 1
+        parts.append(s)
+    if len(parts) == 1:
+        return parts[0]
+    cat = lambda f: np.concatenate([getattr(p, f) for p in parts])
+    merged = Split(cat("X"), cat("y"), cat("off"), cat("take"),
+                   np.zeros(0, dtype=np.int64), cat("beat"), cat("beat_off"),
+                   cat("period"))
+    # recompute valid centres over the merged take ids
+    n = len(merged.X)
+    idx = np.arange(n)
+    ok = (idx >= past) & (idx < n - future)
+    ok[past : n - future] &= merged.take[: n - past - future] == merged.take[past + future :]
+    merged.centres = np.flatnonzero(ok).astype(np.int64)
+    return merged

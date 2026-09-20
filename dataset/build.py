@@ -86,14 +86,16 @@ def main():
         r = render.render(
             clip, kit, classes=DETECTION_CLASSES, backing=bed, min_seconds=a.seconds
         )
+        # Convolution is linear and notch-independent, so it happens once per
+        # clip rather than once per take.
+        wet = None if a.no_augment else augment.apply_ir(r.audio)
         for notch in features.NOTCH_HZ:
             dbfs = float(rng.uniform(*render.LEVEL_DBFS))
             if a.no_augment:
                 pcm = r.to_int16(dbfs)
             else:
-                # Room/mic IR then the device's own coil whine at this PWM
-                # setting, both at their measured absolute levels.
-                y = augment.process(r.audio, notch, rng, dbfs=dbfs)
+                # Coil whine for this PWM setting, at its measured absolute level.
+                y = augment.finish(wet, notch, rng, dbfs=dbfs)
                 pcm = (y * 32767.0).astype(np.int16)
             X = features.featurise(pcm, notch)
             y, off = features.label_blocks(

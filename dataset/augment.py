@@ -66,10 +66,43 @@ def load_floor(captures: str = str(CAPTURES)) -> np.ndarray:
     return x.astype(np.float32)
 
 
+@lru_cache(maxsize=4)
+def _kernel_spectrum(key: tuple, nfft: int) -> np.ndarray:
+    """rfft of the IR, cached: the same kernel is reused for every take."""
+    return np.fft.rfft(_KERNELS[key], nfft)
+
+
+_KERNELS: dict[tuple, np.ndarray] = {}
+
+
 def apply_ir(x: np.ndarray, ir: np.ndarray | None = None) -> np.ndarray:
-    """Convolve, preserving length and onset timing."""
+    """Convolve, preserving length and onset timing.
+
+    Overlap-add in the frequency domain. Direct convolution of a 12 s take
+    against a 24k-tap IR is 14 G MAC and dominated the whole build; this is the
+    same arithmetic at O(n log m), with the kernel's spectrum computed once and
+    reused across every take.
+    """
     k = load_ir() if ir is None else ir
-    return np.convolve(x, k)[: len(x)].astype(np.float32)
+    n, m = len(x), len(k)
+    if m == 0 or n == 0:
+        return np.asarray(x, dtype=np.float32)
+    if n < 4 * m:  # short takes: the transform costs more than it saves
+        return np.convolve(x, k)[:n].astype(np.float32)
+
+    nfft = 1 << max(11, (2 * m - 1).bit_length())
+    hop = nfft - m + 1
+    key = (k.shape[0], float(k[0]), float(k[-1]), float(k.sum()))
+    _KERNELS.setdefault(key, k)
+    K = _kernel_spectrum(key, nfft)
+
+    out = np.zeros(n + m - 1, dtype=np.float64)
+    for i in range(0, n, hop):
+        seg = x[i : i + hop]
+        y = np.fft.irfft(np.fft.rfft(seg, nfft) * K, nfft)
+        end = min(i + nfft, out.size)
+        out[i:end] += y[: end - i]
+    return out[:n].astype(np.float32)
 
 
 def add_noise(
@@ -83,9 +116,10 @@ def add_noise(
     bed = load_floor() if notch_hz is None else load_whine(notch_hz)
     if bed.size == 0:
         return x
-    start = int(rng.integers(bed.size))
-    tiled = np.resize(np.roll(bed, -start), len(x))
-    return (x + tiled * gain).astype(np.float32)
+    if len(x) > bed.size:
+        bed = np.tile(bed, int(np.ceil(len(x) / bed.size)) + 1)
+    start = int(rng.integers(bed.size - len(x))) if bed.size > len(x) else 0
+    return (x + bed[start : start + len(x)] * gain).astype(np.float32)
 
 
 def whine_lines(captures: str = str(CAPTURES)) -> dict[int, list[tuple[float, float]]]:
@@ -94,16 +128,27 @@ def whine_lines(captures: str = str(CAPTURES)) -> dict[int, list[tuple[float, fl
     return {int(k): [(float(f), float(d)) for f, d in v] for k, v in raw.items()}
 
 
+def finish(
+    wet: np.ndarray, notch_hz: int | None, rng: np.random.Generator, *, dbfs: float
+) -> np.ndarray:
+    """Level an already-convolved take and add the device's noise.
+
+    Split from `apply_ir` because convolution is linear and its result does not
+    depend on the notch setting or the level: one take can be convolved once and
+    finished at several settings.
+
+    Scaling happens before the noise is added, never after — scaling afterwards
+    would drag the noise floor along with the music and undo the point of
+    injecting it at an absolute level.
+    """
+    peak = float(np.abs(wet).max())
+    if peak > 0:
+        wet = wet / peak * 10 ** (dbfs / 20.0)
+    return np.clip(add_noise(wet, notch_hz, rng), -1.0, 1.0)
+
+
 def process(
     x: np.ndarray, notch_hz: int, rng: np.random.Generator, *, dbfs: float
 ) -> np.ndarray:
-    """Full chain at a chosen playback level.
-
-    The music is scaled first so the whine sits at its true level relative to it:
-    scaling afterwards would drag the noise floor along with the music and undo
-    the point of injecting it at an absolute level.
-    """
-    peak = float(np.abs(x).max())
-    if peak > 0:
-        x = x / peak * 10 ** (dbfs / 20.0)
-    return np.clip(add_noise(apply_ir(x), notch_hz, rng), -1.0, 1.0)
+    """Full chain at a chosen playback level, for one-off use."""
+    return finish(apply_ir(x), notch_hz, rng, dbfs=dbfs)

@@ -17,7 +17,7 @@ import numpy as np
 
 from frontend.fe import BLOCK_SAMPLES, SAMPLE_RATE as SR
 
-from . import alc, features, render
+from . import alc, augment, features, render
 from .ableton import DETECTION_CLASSES, Library
 
 SPLITS = (("train", 0.8), ("val", 0.1), ("test", 0.1))
@@ -40,12 +40,18 @@ def main():
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--seconds", type=float, default=render.AGC_SETTLE_S + render.KEEP_S)
     ap.add_argument("--no-backing", action="store_true")
+    ap.add_argument("--no-augment", action="store_true",
+                    help="skip the IR and whine; dry renders only")
+    ap.add_argument("--ir", type=Path, default=augment.IR_PATH)
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
 
     lib = Library()
     pools = render.pools_from_manifest(a.manifest)
     beds = {} if a.no_backing else render.backing_pool(a.manifest)
+    if not a.no_augment:
+        augment.IR_PATH = a.ir
+        print(f"augmenting with {a.ir} + measured coil whine per PWM setting")
     print("one-shot pools:", {k: len(v) for k, v in sorted(pools.items())})
     print("backing tempos:", len(beds))
 
@@ -82,7 +88,14 @@ def main():
         )
         for notch in features.NOTCH_HZ:
             dbfs = float(rng.uniform(*render.LEVEL_DBFS))
-            X = features.featurise(r.to_int16(dbfs), notch)
+            if a.no_augment:
+                pcm = r.to_int16(dbfs)
+            else:
+                # Room/mic IR then the device's own coil whine at this PWM
+                # setting, both at their measured absolute levels.
+                y = augment.process(r.audio, notch, rng, dbfs=dbfs)
+                pcm = (y * 32767.0).astype(np.int16)
+            X = features.featurise(pcm, notch)
             y, off = features.label_blocks(
                 len(X), r.onsets, r.classes, len(DETECTION_CLASSES)
             )
@@ -112,6 +125,10 @@ def main():
         "backing": not a.no_backing,
         "agc_settle_s": render.AGC_SETTLE_S,
         "level_dbfs": list(render.LEVEL_DBFS),
+        "augmented": not a.no_augment,
+        "ir": None if a.no_augment else str(a.ir),
+        "ir_sha256": None if a.no_augment or not a.ir.exists()
+                     else hashlib.sha256(a.ir.read_bytes()).hexdigest(),
         **features.spec(),
     }
     for s, _ in SPLITS:

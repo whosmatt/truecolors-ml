@@ -41,9 +41,11 @@ Snares/claps/rims/snaps can be separated into individual classes but there is so
 
 ### Preprocessing
 
-I recorded an IR of the target mic against a calibrated reference microphone, which is then applied to the training data.  
+I recorded an IR of the target mic against a calibrated speaker inside a typical room, which is then applied to the training data.
+This will do for now, but a future plan is to split the mic response from the room response and apply a variety of room IRs for augmentation.  
+Coil whine is included via recordings that are mixed into the training samples. They contain the mic noise floor too.  
 Silent attack is stripped from samples to reduce onset variance.  
-There is no augmentation yet; adding various room IRs might be useful later.  
+The entire on-device preprocessing chain is compiled, wrapped into a python module and applied to the training data verbatim, this includes the comb and lowpass filter. 
 
 ## Setup
 

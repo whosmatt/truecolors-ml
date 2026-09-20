@@ -29,6 +29,8 @@ class Split:
     off: np.ndarray     # (N, C) position within the block, [0, 1)
     take: np.ndarray    # (N,) take id
     centres: np.ndarray # indices with a full window inside one take
+    beat: np.ndarray | None = None      # (N, 1) beat grid, exact
+    beat_off: np.ndarray | None = None  # (N, 1) sub-block position
 
     def __len__(self) -> int:
         return len(self.centres)
@@ -42,7 +44,9 @@ def load(path: Path, split: str, past: int = PAST, future: int = FUTURE) -> Spli
     idx = np.arange(n)
     ok = (idx >= past) & (idx < n - future)
     ok[past : n - future] &= take[: n - past - future] == take[past + future :]
-    return Split(X, y, off, take, np.flatnonzero(ok).astype(np.int64))
+    return Split(X, y, off, take, np.flatnonzero(ok).astype(np.int64),
+                 d["beat"] if "beat" in d.files else None,
+                 d["beat_off"] if "beat_off" in d.files else None)
 
 
 def normaliser(s: Split) -> tuple[np.ndarray, np.ndarray]:
@@ -69,11 +73,13 @@ class Windows(keras.utils.PyDataset):
         future: int = FUTURE,
         seed: int = 0,
         with_offset: bool = True,
+        targets: tuple[str, ...] = ("hit", "offset"),
         **kw,
     ):
         super().__init__(**kw)
         self.s, self.mean, self.scale, self.batch = s, mean, scale, batch
         self.with_offset = with_offset
+        self.targets = targets
         self.offsets = np.arange(-past, future + 1)
         self.shuffle = shuffle
         self.rng = np.random.default_rng(seed)
@@ -92,10 +98,19 @@ class Windows(keras.utils.PyDataset):
         hit = self.s.y[c]
         # -1 marks "no onset here", so the offset loss can mask itself: there is
         # no meaningful sub-block position for a block with no onset in it.
-        if not self.with_offset:
-            return xb, {"hit": hit}
-        off = np.where(hit > 0, self.s.off[c], -1.0).astype(np.float32)
-        return xb, {"hit": hit, "offset": off}
+        out = {}
+        if "hit" in self.targets:
+            out["hit"] = hit
+        if "offset" in self.targets:
+            k = self.s.off.shape[1]
+            out["offset"] = np.where(hit[:, :k] > 0, self.s.off[c], -1.0).astype(np.float32)
+        if "beat" in self.targets:
+            out["beat"] = self.s.beat[c]
+        if "beat_offset" in self.targets:
+            out["beat_offset"] = np.where(
+                self.s.beat[c] > 0, self.s.beat_off[c], -1.0
+            ).astype(np.float32)
+        return xb, out
 
     def on_epoch_end(self):
         if self.shuffle:

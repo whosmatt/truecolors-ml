@@ -24,8 +24,11 @@ def predict(m, split: data.Split, mean, scale, batch=8192) -> tuple[np.ndarray, 
     """Dense per-block predictions, aligned back onto the block index."""
     ds = data.Windows(split, mean, scale, batch=batch, shuffle=False)
     out = m.predict(ds, verbose=0)
-    hit = np.zeros_like(split.y)
-    off = np.zeros_like(split.off) if "offset" in out else None
+    # Size from the model, not the labels: a model trained without the none
+    # class has fewer outputs than the label array has columns.
+    hit = np.zeros((len(split.X), out["hit"].shape[1]), dtype=np.float32)
+    off = (np.zeros((len(split.X), out["offset"].shape[1]), dtype=np.float32)
+           if "offset" in out else None)
     hit[split.centres] = out["hit"]
     if off is not None:
         off[split.centres] = out["offset"]
@@ -73,11 +76,15 @@ def main():
 
     m = model_mod.build(
         data.WINDOW * len(meta["feature_order"]),
-        n_classes=len(DETECTION_CLASSES),
+        n_classes=tr.y.shape[1],
+        n_offsets=tr.off.shape[1],
         hidden=tuple(a.hidden),
         offset_head=not a.no_offset_head,
     )
-    losses = {"hit": model_mod.weighted_bce(a.pos_weight)}
+    # none is the majority class and needs no up-weighting
+    pw = [a.pos_weight] * len(DETECTION_CLASSES) + [1.0] * (tr.y.shape[1] - len(DETECTION_CLASSES))
+    losses = {"hit": model_mod.weighted_bce(pw if tr.y.shape[1] > len(DETECTION_CLASSES)
+                                            else a.pos_weight)}
     if not a.no_offset_head:
         losses["offset"] = model_mod.masked_mse
     m.compile(optimizer=keras.optimizers.Adam(a.lr), loss=losses,

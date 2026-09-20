@@ -114,7 +114,7 @@ def cross_match(hit, off, split, thresholds):
 
 def fig_confusion(cm, path):
     labels = list(DETECTION_CLASSES) + ["none"]
-    frac = cm / np.maximum(cm.sum(axis=1, keepdims=True), 1)
+    frac = cm / np.maximum(cm.sum(axis=1, keepdims=True), 1)  # row-normalised
     fig, ax = new_fig(4.2, 3.6)
     cmap = matplotlib.colors.LinearSegmentedColormap.from_list("seq", SEQ)
     ax.imshow(frac, cmap=cmap, vmin=0, vmax=1)
@@ -122,12 +122,12 @@ def fig_confusion(cm, path):
         for j in range(len(labels)):
             if i == len(labels) - 1 and j == len(labels) - 1:
                 continue
-            ax.text(j, i, f"{cm[i,j]:,}", ha="center", va="center", fontsize=8,
-                    color="#ffffff" if frac[i, j] > 0.45 else INK)
+            ax.text(j, i, f"{frac[i,j]*100:.1f}%", ha="center", va="center",
+                    fontsize=8, color="#ffffff" if frac[i, j] > 0.45 else INK)
     ax.set_xticks(range(len(labels)), labels)
     ax.set_yticks(range(len(labels)), labels)
     ax.grid(False)
-    style(ax, "predicted", "true", "Onset confusion (test split, counts)")
+    style(ax, "predicted", "true", "Onset confusion, row-normalised")
     ax.grid(False)
     ax.tick_params(colors=INK2, labelsize=8)
     fig.tight_layout()
@@ -191,7 +191,8 @@ def fig_pr(hit, off, split, path):
 
 
 def fig_tempo(res, path):
-    fig, axes = plt.subplots(1, 2, figsize=(8.4, 3.2), dpi=160)
+    fig, axes = plt.subplots(1, 1, figsize=(4.6, 3.4), dpi=160, squeeze=False)
+    axes = axes[0]
     fig.patch.set_facecolor(SURFACE)
     true = np.array([r["true_bpm"] for r in res])
     est = np.array([r["est_bpm"] for r in res])
@@ -212,19 +213,6 @@ def fig_tempo(res, path):
     style(ax, "true BPM", "estimated BPM", "Tempo, real drum loops")
     ax.legend(frameon=False, fontsize=8, labelcolor=INK2, loc="upper left")
 
-    ax = axes[1]
-    ph = np.sort(np.array([r["phase_ms"] for r in res if r["octave_ok"]]))
-    y = np.arange(1, ph.size + 1) / ph.size
-    ax.plot(ph, y, color=SERIES["kick"], linewidth=2.0)
-    med = float(np.median(ph))
-    ax.plot([med], [0.5], "o", color=SERIES["kick"], markersize=8,
-            markeredgecolor=SURFACE, markeredgewidth=1.5)
-    ax.annotate(f"median {med:.0f} ms", (med, 0.5), textcoords="offset points",
-                xytext=(8, -4), fontsize=8, color=INK2)
-    ax.set_xlim(0, 260)
-    ax.set_ylim(0, 1)
-    style(ax, "grid phase error (ms)", "fraction of loops",
-          "Phase, where tempo is right up to an octave")
     fig.tight_layout()
     fig.savefig(path, facecolor=SURFACE)
     plt.close(fig)
@@ -342,8 +330,8 @@ def write_page(out: Path, run: Path, stats: dict, cm, errs, tres, thresholds):
           f"| {p['kick']:,} | {p['snare']:,} | {p['hihat']:,} |")
     a(f"| **total** | {sum(v['takes'] for v in sp.values()):,} | {sum(v['blocks'] for v in sp.values()):,} "
       f"| {total_h:.2f} | {mb(stats['features_bytes'])} | | | |\n")
-    a(f"Manifest {mb(stats['manifest_bytes'])}. Tempo test set: {len(tres)} real drum loops, "
-      f"{len(tres)*tempo.TAKE_S/3600:.2f} h, disjoint from training.\n")
+    a(f"| manifest | | | | {mb(stats['manifest_bytes'])} | | | |")
+    a(f"| tempo test (real loops) | {len(tres):,} | | {len(tres)*tempo.TAKE_S/3600:.2f} | | | | |\n")
 
     a("## Onset detection: test split\n")
     a("| class | median | p90 | bias | F1 | precision | recall | n |")
@@ -356,21 +344,19 @@ def write_page(out: Path, run: Path, stats: dict, cm, errs, tres, thresholds):
     a("![detection](pr.png)\n")
     a("![confusion](confusion.png)\n")
 
-    a("## Grid: real drum loops\n")
+    a("## Grid: tempo on real drum loops (period only)\n")
     a("| metric | value |\n|---|---|")
     a(f"| tempo within 4% | {ex:.1%} |")
     a(f"| tempo within 4% allowing octave/triplet | {oc:.1%} |")
-    a(f"| phase error, median | {np.median(ph):.1f} ms |")
-    a(f"| phase error, p90 | {np.percentile(ph, 90):.1f} ms |")
     a(f"| loops | {len(tres)} |\n")
     a("![tempo](tempo.png)\n")
 
-    a("## Stage 2 input, same loops\n")
-    a("| input | tempo within 4% | +octave | phase median |")
+    a("## Grid: rendered clips, exact grid (identical stage 2, 3 seeds)\n")
+    a("| stage 2 input | tempo within 4% | +octave | phase median |")
     a("|---|---|---|---|")
-    a("| model activation | 44.1% | 80.2% | 21.8 ms |")
-    a("| thresholded onsets | 36.0% | 72.9% | 21.4 ms |")
-    a("| raw flux | 37.7% | 78.1% | 18.1 ms |\n")
+    a("| this model's activation | 37.8% ±1.8 | 78.7% ±1.0 | 8.58 ms |")
+    a("| beat activation (approach 2) | 40.1% ±0.2 | 79.2% ±1.0 | 8.66 ms |")
+    a("| raw flux | 27.9% | 68.5% | 11.5 ms |\n")
     (out / "README.md").write_text("\n".join(L))
 
 

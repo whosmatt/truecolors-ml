@@ -60,7 +60,8 @@ def main():
     print("backing tempos:", len(beds))
 
     ids = alc.drum_clips(lib)[: a.limit or None]
-    acc = {s: {"X": [], "y": [], "off": [], "take": [], "notch": []} for s, _ in SPLITS}
+    acc = {s: {"X": [], "y": [], "off": [], "take": [], "notch": [],
+               "beat": [], "beat_off": []} for s, _ in SPLITS}
     takes, skipped, t0 = 0, 0, time.time()
     bed_cache: dict[str, np.ndarray] = {}
 
@@ -105,16 +106,35 @@ def main():
             y, off = features.label_blocks(
                 len(X), r.onsets, r.classes, len(DETECTION_CLASSES)
             )
+            # Beat grid, exact: the clip's MIDI puts beat 0 at its start and the
+            # take is whole repeats of the clip, so beats run at 60/tempo
+            # throughout. This is the supervision approach 2 needs — deriving it
+            # from real loops instead gives 20 ms median error and 17% off-beat
+            # locks, measured against these same clips.
+            beat_s = 60.0 / clip.tempo
+            n_beats = len(X) * BLOCK_SAMPLES / SR / beat_s
+            bt = np.arange(int(n_beats) + 1) * beat_s * SR
+            beat, beat_off = features.label_blocks(
+                len(X), bt.astype(np.int64), np.zeros(len(bt), dtype=np.int8), 1
+            )
+            # Explicit "nothing here" channel. Without it the only negative
+            # signal is the absence of a positive, and the confusion matrix
+            # showed the surplus landing on hihat.
+            none = (y.sum(axis=1, keepdims=True) == 0).astype(np.float32)
+            y = np.concatenate([y, none], axis=1)
             # Drop the settle window: the AGC has not converged there, so those
             # blocks do not look like anything the device would see in steady state.
             skip = int(render.AGC_SETTLE_S * SR / BLOCK_SAMPLES)
             X, y, off = X[skip:], y[skip:], off[skip:]
+            beat, beat_off = beat[skip:], beat_off[skip:]
             if not len(X):
                 continue
             d = acc[split]
             d["X"].append(X)
             d["y"].append(y)
             d["off"].append(off)
+            d["beat"].append(beat)
+            d["beat_off"].append(beat_off)
             d["take"].append(np.full(len(X), takes, dtype=np.int32))
             d["notch"].append(np.full(len(X), notch, dtype=np.int16))
             takes += 1
@@ -125,6 +145,7 @@ def main():
         "built": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "manifest_sha256": hashlib.sha256(a.manifest.read_bytes()).hexdigest(),
         "classes": list(DETECTION_CLASSES),
+        "beat_labels": True,
         "takes": takes,
         "clips_skipped": skipped,
         "seconds_per_take": a.seconds,

@@ -29,29 +29,30 @@ flowchart LR
 | features | 12 per block, 10.667 ms/block |
 | window | 16 blocks (171 ms), lookahead 2 (21.3 ms) |
 | model | [128, 64] hidden, offset head true |
-| size | 33,152 MAC/inference, ~32 KB int8 |
+| size | 33,216 MAC/inference, ~32 KB int8 |
 | augmentation | IR `data/ir/mic_preliminary.wav`, coil whine per PWM setting, -40..-6 dBFS |
-| thresholds | kick 0.85, snare 0.85, hihat 0.75 |
+| thresholds | kick 0.90, snare 0.85, hihat 0.75 |
 | provenance | manifest `a9830eda7ba1`, IR `5279ea9dd9f4` |
 
 ## Dataset
 
 | split | takes | blocks | hours | size | kick | snare | hihat |
 |---|---|---|---|---|---|---|---|
-| train | 2,382 | 2,846,052 | 8.43 | 212 MB | 33,864 | 34,896 | 67,923 |
-| val | 297 | 369,396 | 1.09 | 27 MB | 4,206 | 4,548 | 8,004 |
-| test | 276 | 323,631 | 0.96 | 24 MB | 4,092 | 4,341 | 7,827 |
-| **total** | 2,955 | 3,539,079 | 10.49 | 263 MB | | | |
+| train | 2,382 | 2,846,052 | 8.43 | 244 MB | 33,864 | 34,896 | 67,923 |
+| val | 297 | 369,396 | 1.09 | 32 MB | 4,206 | 4,548 | 8,004 |
+| test | 276 | 323,631 | 0.96 | 28 MB | 4,092 | 4,341 | 7,827 |
+| **total** | 2,955 | 3,539,079 | 10.49 | 304 MB | | | |
 
-Manifest 58 MB. Tempo test set: 247 real drum loops, 1.37 h, disjoint from training.
+| manifest | | | | 58 MB | | | |
+| tempo test (real loops) | 247 | | 1.37 | | | | |
 
-## Onset detection test split
+## Onset detection: test split
 
 | class | median | p90 | bias | F1 | precision | recall | n |
 |---|---|---|---|---|---|---|---|
-| kick | 1.61 ms | 4.72 ms | +0.18 ms | 0.805 | 0.771 | 0.843 | 4,092 |
-| snare | 1.67 ms | 4.46 ms | +0.25 ms | 0.741 | 0.714 | 0.770 | 4,341 |
-| hihat | 2.35 ms | 9.83 ms | +0.38 ms | 0.632 | 0.543 | 0.756 | 7,827 |
+| kick | 1.51 ms | 4.38 ms | +0.05 ms | 0.816 | 0.847 | 0.788 | 4,092 |
+| snare | 1.68 ms | 4.37 ms | +0.25 ms | 0.740 | 0.722 | 0.759 | 4,341 |
+| hihat | 2.38 ms | 9.73 ms | +0.44 ms | 0.632 | 0.550 | 0.744 | 7,827 |
 
 ![onset timing](timing.png)
 
@@ -59,22 +60,20 @@ Manifest 58 MB. Tempo test set: 247 real drum loops, 1.37 h, disjoint from train
 
 ![confusion](confusion.png)
 
-## Grid: real drum loops
+## Grid: tempo on real drum loops (period only)
 
 | metric | value |
 |---|---|
-| tempo within 4% | 44.1% |
-| tempo within 4% allowing octave/triplet | 80.2% |
-| phase error, median | 21.8 ms |
-| phase error, p90 | 245.0 ms |
+| tempo within 4% | 42.5% |
+| tempo within 4% allowing octave/triplet | 79.8% |
 | loops | 247 |
 
 ![tempo](tempo.png)
 
-## Stage 2 input, same loops
+## Grid: rendered clips, exact grid (identical stage 2, 3 seeds)
 
-| input | tempo within 4% | +octave | phase median |
+| stage 2 input | tempo within 4% | +octave | phase median |
 |---|---|---|---|
-| model activation | 44.1% | 80.2% | 21.8 ms |
-| thresholded onsets | 36.0% | 72.9% | 21.4 ms |
-| raw flux | 37.7% | 78.1% | 18.1 ms |
+| this model's activation | 37.8% ±1.8 | 78.7% ±1.0 | 8.58 ms |
+| beat activation (approach 2) | 40.1% ±0.2 | 79.2% ±1.0 | 8.66 ms |
+| raw flux | 27.9% | 68.5% | 11.5 ms |

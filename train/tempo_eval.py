@@ -20,8 +20,9 @@ def activations(X, model, mean, scale):
     c = np.arange(data.PAST, len(X) - data.FUTURE)
     w = X[c[:, None] + np.arange(-data.PAST, data.FUTURE + 1)]
     out = model.predict(((w - mean) / scale).reshape(len(c), -1), verbose=0, batch_size=8192)
-    hit = np.zeros((len(X), len(DETECTION_CLASSES)), dtype=np.float32)
-    hit[c] = out["hit"]
+    key = "beat" if "beat" in out else "hit"
+    hit = np.zeros((len(X), out[key].shape[1]), dtype=np.float32)
+    hit[c] = out[key]
     return hit
 
 

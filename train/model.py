@@ -12,11 +12,22 @@ from keras import layers, ops
 POS_WEIGHT = 20.0  # positives are ~1.2% of blocks
 
 
-def weighted_bce(pos_weight: float = POS_WEIGHT):
+def weighted_bce(pos_weight=POS_WEIGHT):
+    """Per-class positive weight. A scalar applies to every class.
+
+    The none class is ~95% of blocks, so it needs weight 1 while the drum
+    classes need ~20; a single scalar across all four would swamp the loss with
+    the majority class.
+    """
+    w = ops.convert_to_tensor(
+        np.asarray(pos_weight, dtype="float32")
+        if not np.isscalar(pos_weight) else np.float32(pos_weight)
+    )
+
     def loss(y_true, y_pred):
         p = ops.clip(y_pred, 1e-7, 1.0 - 1e-7)
         return -ops.mean(
-            pos_weight * y_true * ops.log(p) + (1.0 - y_true) * ops.log(1.0 - p)
+            w * y_true * ops.log(p) + (1.0 - y_true) * ops.log(1.0 - p)
         )
 
     loss.__name__ = "weighted_bce"
@@ -32,6 +43,7 @@ def masked_mse(y_true, y_pred):
 def build(
     n_input: int,
     n_classes: int = 3,
+    n_offsets: int | None = None,
     hidden: tuple[int, ...] = (128, 64),
     offset_head: bool = True,
     dropout: float = 0.1,
@@ -44,7 +56,8 @@ def build(
             x = layers.Dropout(dropout, name=f"drop{i}")(x)
     outs = {"hit": layers.Dense(n_classes, activation="sigmoid", name="hit")(x)}
     if offset_head:
-        outs["offset"] = layers.Dense(n_classes, activation="sigmoid", name="offset")(x)
+        outs["offset"] = layers.Dense(n_offsets or n_classes, activation="sigmoid",
+                                      name="offset")(x)
     return keras.Model(inp, outs, name="onset")
 
 

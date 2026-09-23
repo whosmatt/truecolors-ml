@@ -31,6 +31,7 @@ def main():
     ap.add_argument("--out", type=Path, default=Path("data/loops"))
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--repeats", type=int, default=1)
+    ap.add_argument("--no-hicut", action="store_true", help="build without the 4 kHz hi-cut")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
 
@@ -46,7 +47,7 @@ def main():
         for rep in range(a.repeats):
             rng = np.random.default_rng(row["file_id"] + 7919 * rep)
             notch = features.NOTCH_HZ[(i + rep) % len(features.NOTCH_HZ)]
-            r = gridset.take(row, rng, notch)
+            r = gridset.take(row, rng, notch, hicut=not a.no_hicut)
             if r is None:
                 continue
             X = r[0][skip:]
@@ -70,7 +71,7 @@ def main():
     meta = {"built": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "source": "BPM-verified drum loops, period label only",
             "masked": ["y", "off", "beat", "beat_off"], "takes": n,
-            **features.spec(comb=False, hicut=True)}
+            **features.spec(comb=False, hicut=not a.no_hicut)}
     for s, _ in gridset.SPLITS:
         d = acc[s]
         if not d["X"]:

@@ -32,6 +32,10 @@ class Split:
     beat: np.ndarray | None = None      # (N, 1) beat grid, exact; -1 = masked
     beat_off: np.ndarray | None = None  # (N, 1) sub-block position
     period: np.ndarray | None = None    # (N, 1) beat period in blocks
+    downbeat: np.ndarray | None = None      # (N, 1) bar starts; -1 masked
+    downbeat_off: np.ndarray | None = None  # (N, 1)
+    phrase: np.ndarray | None = None        # (N, 1) loop length in beats
+    music: np.ndarray | None = None         # (N, 1) 1 music, 0 not, -1 masked
 
     def __len__(self) -> int:
         return len(self.centres)
@@ -48,7 +52,9 @@ def load(path: Path, split: str, past: int = PAST, future: int = FUTURE) -> Spli
     return Split(X, y, off, take, np.flatnonzero(ok).astype(np.int64),
                  d["beat"] if "beat" in d.files else None,
                  d["beat_off"] if "beat_off" in d.files else None,
-                 d["period"] if "period" in d.files else None)
+                 d["period"] if "period" in d.files else None,
+                 *(d[k] if k in d.files else None
+                   for k in ("downbeat", "downbeat_off", "phrase", "music")))
 
 
 def normaliser(s: Split) -> tuple[np.ndarray, np.ndarray]:
@@ -125,27 +131,35 @@ def meta(path: Path) -> dict:
 
 def period_from_beats(s: Split) -> np.ndarray:
     """Per-take beat period in blocks, read off exact beat labels."""
-    out = np.zeros((len(s.X), 1), dtype=np.float32)
-    for t in np.unique(s.take):
-        m = s.take == t
-        idx = np.flatnonzero(s.beat[m][:, 0] > 0)
+    out = np.full((len(s.X), 1), -1.0, dtype=np.float32)
+    # Takes are contiguous runs; a full-length mask per take was O(N * takes)
+    # and cost 180 s on features3.
+    starts = np.flatnonzero(np.r_[True, s.take[1:] != s.take[:-1]])
+    ends = np.r_[starts[1:], len(s.take)]
+    for a, b in zip(starts, ends):
+        idx = np.flatnonzero(s.beat[a:b, 0] > 0)
         if len(idx) < 4:
-            out[m] = -1.0
             continue
-        pos = idx + s.beat_off[m][idx, 0]
-        out[m] = float(np.median(np.diff(pos)))
+        pos = idx + s.beat_off[a:b][idx, 0]
+        out[a:b] = float(np.median(np.diff(pos)))
     return out
 
 
-def load_many(dirs, split: str, past: int = PAST, future: int = FUTURE) -> Split:
+def load_many(dirs, split: str, past: int = PAST, future: int = FUTURE,
+              fill=None) -> Split:
     """Merge corpora, keeping take ids unique.
 
     Corpora without a period column get one derived from their beat labels;
     corpora without beat labels carry -1 and are masked out of those losses.
+    `fill`, one dict per dir, supplies constant labels a corpus implies.
     """
     parts, base = [], 0
-    for d in dirs:
+    for d, f in zip(dirs, fill or [{}] * len(dirs)):
         s = load(Path(d), split, past, future)
+        # Constant labels a corpus lacks but implies, e.g. every loop is music.
+        for k, v in f.items():
+            if getattr(s, k) is None:
+                setattr(s, k, np.full((len(s.X), 1), v, dtype=np.float32))
         if s.period is None:
             s.period = period_from_beats(s) if s.beat is not None else np.full(
                 (len(s.X), 1), -1.0, dtype=np.float32)
@@ -154,10 +168,19 @@ def load_many(dirs, split: str, past: int = PAST, future: int = FUTURE) -> Split
         parts.append(s)
     if len(parts) == 1:
         return parts[0]
-    cat = lambda f: np.concatenate([getattr(p, f) for p in parts])
-    merged = Split(cat("X"), cat("y"), cat("off"), cat("take"),
+    def cat(f, width=1):
+        cols = []
+        for p in parts:
+            v = getattr(p, f)
+            cols.append(np.full((len(p.X), width), -1.0, dtype=np.float32) if v is None else v)
+        return np.concatenate(cols)
+
+    merged = Split(cat("X", parts[0].X.shape[1]), cat("y", parts[0].y.shape[1]),
+                   cat("off", parts[0].off.shape[1]),
+                   np.concatenate([p.take for p in parts]),
                    np.zeros(0, dtype=np.int64), cat("beat"), cat("beat_off"),
-                   cat("period"))
+                   cat("period"), cat("downbeat"), cat("downbeat_off"),
+                   cat("phrase"), cat("music"))
     # recompute valid centres over the merged take ids
     n = len(merged.X)
     idx = np.arange(n)

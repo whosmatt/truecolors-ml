@@ -60,7 +60,7 @@ def loop_pool(manifest: str) -> list[dict]:
     return out
 
 
-def take(row: dict, rng: np.random.Generator, notch: int):
+def take(row: dict, rng: np.random.Generator, notch: int, hicut: bool = True):
     """-> (features, beat hit per block, sub-block offset) or None."""
     try:
         x, sr = sf.read(row["path"], dtype="float32", always_2d=True)
@@ -88,7 +88,7 @@ def take(row: dict, rng: np.random.Generator, notch: int):
     wet = augment.apply_ir(tiled)
     dbfs = float(rng.uniform(*render.LEVEL_DBFS))
     y = augment.finish(wet, notch, rng, dbfs=dbfs)
-    X = features.featurise((y * 32767.0).astype(np.int16), notch, comb=False, hicut=True)
+    X = features.featurise((y * 32767.0).astype(np.int16), notch, comb=False, hicut=hicut)
 
     hit = np.zeros((len(X), 1), dtype=np.float32)
     frac = np.zeros((len(X), 1), dtype=np.float32)

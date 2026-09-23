@@ -11,6 +11,9 @@ Instead each library is loaded with RTLD_GLOBAL up front: a soname already in th
 global namespace satisfies TF's later dlopen without any path search.
 
     import train.gpu  # noqa: must precede any tensorflow import
+
+`limit_memory()` is also called on import, so concurrent runs share the card
+instead of the first one claiming it all.
 """
 
 import ctypes
@@ -56,4 +59,24 @@ def preload() -> int:
     return n
 
 
+def limit_memory() -> None:
+    """Let TF grow into VRAM instead of claiming it all at import.
+
+    TF reserves ~90% of the device by default, so a training run plus any
+    evaluation script started alongside it fight over the same card and one of
+    them falls over or crawls. Growth mode means each process takes what it
+    actually uses.
+    """
+    try:
+        import tensorflow as tf
+    except ImportError:
+        return
+    for dev in tf.config.list_physical_devices("GPU"):
+        try:
+            tf.config.experimental.set_memory_growth(dev, True)
+        except RuntimeError:
+            pass  # already initialised; nothing to do
+
+
 preload()
+limit_memory()

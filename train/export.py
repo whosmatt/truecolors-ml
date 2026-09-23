@@ -45,7 +45,7 @@ def to_tflite(model, rep) -> bytes:
     return conv.convert()
 
 
-def run_tflite(blob: bytes, split, mean, scale, spec, names=("beat", "beat_offset", "hit")):
+def run_tflite(blob: bytes, split, mean, scale, spec, names):
     """Dense int8 predictions, aligned back onto the block index.
 
     Outputs are matched by their position in the signature, not by name: the
@@ -56,11 +56,12 @@ def run_tflite(blob: bytes, split, mean, scale, spec, names=("beat", "beat_offse
     it.allocate_tensors()
     inp = it.get_input_details()[0]
     outs = sorted(it.get_output_details(), key=lambda d: int(d["name"].rsplit(":", 1)[1]))
-    assert len(outs) == len(names), f"expected {names}, got {[d['name'] for d in outs]}"
+    assert len(outs) == len(names), f"expected {names}, got {len(outs)} outputs"
     in_scale, in_zero = inp["quantization"]
 
     ds = mres.MResWindows(split, mean, scale, spec, targets=(), batch=1024)
-    acc = {n: np.zeros(len(split.X), dtype=np.float32) for n in names if n != "hit"}
+    acc = {n: np.zeros(len(split.X), dtype=np.float32) for n in names
+           if n in ("beat", "beat_offset", "music")}
     pos = 0
     for i in range(len(ds)):
         x, _ = ds[i]
@@ -69,7 +70,7 @@ def run_tflite(blob: bytes, split, mean, scale, spec, names=("beat", "beat_offse
             it.set_tensor(inp["index"], row[None, :])
             it.invoke()
             for name, d in zip(names, outs):
-                if name == "hit":
+                if name not in acc:
                     continue
                 s, z = d["quantization"]
                 acc[name][ds.order[pos]] = (float(it.get_tensor(d["index"])[0, 0]) - z) * s
@@ -83,6 +84,9 @@ def main():
     ap.add_argument("--features", type=Path, default=Path("data/features3"))
     ap.add_argument("--out", type=Path, default=Path("export"))
     ap.add_argument("--calib", type=int, default=200)
+    ap.add_argument("--calib-extra", type=Path, nargs="*", default=[],
+                    help="more corpora for int8 calibration, e.g. data/noise data/loops "
+                         "for a music head that must see them in range")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
 
@@ -96,7 +100,8 @@ def main():
 
     print("converting...", flush=True)
     t0 = time.time()
-    blob = to_tflite(model, representative(tr, mean, scale, spec, n=a.calib))
+    calib = data.load_many([a.features, *a.calib_extra], "train") if a.calib_extra else tr
+    blob = to_tflite(model, representative(calib, mean, scale, spec, n=a.calib))
     (a.out / "model.tflite").write_bytes(blob)
     print(f"  {len(blob)/1024:.1f} KB in {time.time()-t0:.0f}s")
 
@@ -104,7 +109,8 @@ def main():
     af = act_float(model, te, mean, scale, spec, key="beat")
     rf = gridmetrics.per_take(af, te)
     print("scoring int8...", flush=True)
-    q = run_tflite(blob, te, mean, scale, spec)
+    heads = list(model.output_names) if hasattr(model, "output_names") else list(model.output.keys())
+    q = run_tflite(blob, te, mean, scale, spec, heads)
     aq = q["beat"]
     rq = gridmetrics.per_take(aq, te)
 
@@ -124,13 +130,17 @@ def main():
         "feature_order": meta["feature_order"],
         "block_samples": meta["block_samples"],
         "sample_rate": 48000,
-        "context": {**run["spec"], "frames": run["frames"],
-                    "inputs": run["frames"] * len(meta["feature_order"]),
-                    "seconds": run["context_s"],
-                    "lookahead_blocks": run["spec"]["fine_future"]},
+        "context": {**run["spec"], "frames": spec.frames,
+                    "inputs": spec.frames * len(meta["feature_order"]),
+                    "seconds": spec.seconds(evaluate.BLOCK_MS),
+                    "lookback_blocks": spec.lookback,
+                    "ring_blocks": spec.lookback + 1 + spec.fine_future,
+                    "lookahead_blocks": spec.fine_future},
         "normalisation": {"mean": [float(x) for x in mean],
                           "scale": [float(x) for x in scale]},
-        "outputs": {"beat": 1, "beat_offset": 1, "hit": 4},
+        "outputs": {k: int(v.shape[-1]) for k, v in zip(
+            heads, (model.outputs if isinstance(model.outputs, list) else [model.outputs]))},
+        "output_order": heads,
         "hit_classes": ["kick", "snare", "hihat", "none"],
         "macs": run["macs"],
         "tflite_bytes": len(blob),

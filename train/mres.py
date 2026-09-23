@@ -72,26 +72,49 @@ def cumsum(X: np.ndarray) -> np.ndarray:
                            np.cumsum(X, axis=0, dtype=np.float64)], axis=0)
 
 
+def pooled(X: np.ndarray, stride: int) -> np.ndarray:
+    """P[j] = mean(X[j-stride:j]); rows below stride are zero and never gathered."""
+    c = cumsum(X)
+    out = np.zeros(X.shape, dtype=np.float32)
+    out[stride:] = (c[stride:-1] - c[:-stride - 1]) / stride
+    return out
+
+
 class MResWindows(keras.utils.PyDataset):
+    """Same windows as gather(), assembled from precomputed pools.
+
+    Normalising before pooling is exact (the normaliser is affine per feature),
+    so batches reduce to three row gathers. The cumsum path cost 11 ms/batch,
+    46 s of each ~54 s epoch.
+    """
+
     def __init__(self, split, mean, scale, spec: Spec, targets, batch=1024,
                  shuffle=False, seed=0, **kw):
         super().__init__(**kw)
         self.s, self.spec, self.targets, self.batch = split, spec, targets, batch
-        self.mean, self.scale = mean, scale
-        self.csum = cumsum(split.X)
+        Xn = ((split.X - mean) / scale).astype(np.float32)
+        self.pools = (Xn, pooled(Xn, spec.mid_stride), pooled(Xn, spec.coarse_stride))
+        mid0 = -spec.fine_past
+        crs0 = mid0 - spec.mid_frames * spec.mid_stride
+        self.offsets = (np.arange(-spec.fine_past, spec.fine_future + 1),
+                        mid0 - np.arange(spec.mid_frames) * spec.mid_stride,
+                        crs0 - np.arange(spec.coarse_frames) * spec.coarse_stride)
         self.order = valid_centres(split.take, spec)
         self.shuffle = shuffle
         self.rng = np.random.default_rng(seed)
         if shuffle:
             self.rng.shuffle(self.order)
 
+    def window(self, c):
+        return np.concatenate([P[c[:, None] + o] for P, o in zip(self.pools, self.offsets)],
+                              axis=1).reshape(len(c), -1)
+
     def __len__(self):
         return int(np.ceil(len(self.order) / self.batch))
 
     def __getitem__(self, i):
         c = self.order[i * self.batch : (i + 1) * self.batch]
-        w = gather(self.s.X, self.csum, c, self.spec).reshape(len(c), self.spec.frames, -1)
-        xb = ((w - self.mean) / self.scale).reshape(len(c), -1).astype(np.float32)
+        xb = self.window(c)
         out = {}
         if "beat" in self.targets:
             out["beat"] = self.s.beat[c]

@@ -1,0 +1,529 @@
+{
+  "baseline": {
+    "run": "runs/data3",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6799516908212561,
+      "octave": 0.893719806763285,
+      "phase_exact": 5.997916666666612,
+      "phase_octave": 15.166666666666629,
+      "phase_p90": 277.625
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5373317013463892,
+      "octave": 0.8922888616891065
+    },
+    "macs": 76160
+  },
+  "e_base": {
+    "run": "runs/e_base",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6980676328502415,
+      "octave": 0.9009661835748792,
+      "phase_exact": 5.866666666666674,
+      "phase_octave": 9.904166666666697,
+      "phase_p90": 273.47083333333336
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5238678090575275,
+      "octave": 0.8763769889840881
+    },
+    "macs": 76160
+  },
+  "e_downbeat": {
+    "run": "runs/e_down",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6352657004830918,
+      "octave": 0.8804347826086957,
+      "phase_exact": 5.566666666666663,
+      "phase_octave": 20.570833333333326,
+      "phase_p90": 277.39166666666665
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.4981640146878825,
+      "octave": 0.8776009791921665
+    },
+    "macs": 76352
+  },
+  "e_noaux": {
+    "run": "runs/e_noaux",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6618357487922706,
+      "octave": 0.9009661835748792,
+      "phase_exact": 5.333333333333371,
+      "phase_octave": 18.4375,
+      "phase_p90": 274.2375
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5348837209302325,
+      "octave": 0.8922888616891065
+    },
+    "macs": 75904
+  },
+  "e_music": {
+    "run": "runs/e_music",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6811594202898551,
+      "octave": 0.894927536231884,
+      "phase_exact": 6.108333333333235,
+      "phase_octave": 15.5,
+      "phase_p90": 277.625
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5299877600979193,
+      "octave": 0.8739290085679314
+    },
+    "macs": 76224
+  },
+  "e_downbeat_only": {
+    "run": "runs/e_downonly",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6243961352657005,
+      "octave": 0.8707729468599034,
+      "phase_exact": 5.8624999999999545,
+      "phase_octave": 21.914583333333326,
+      "phase_p90": 277.97916666666663
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5116279069767442,
+      "octave": 0.8824969400244798
+    },
+    "macs": 76288
+  },
+  "e_phrase_only": {
+    "run": "runs/e_phraseonly",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6606280193236715,
+      "octave": 0.8864734299516909,
+      "phase_exact": 5.866666666666674,
+      "phase_octave": 15.166666666666629,
+      "phase_p90": 277.3333333333333
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5299877600979193,
+      "octave": 0.8727050183598531
+    },
+    "macs": 76224
+  },
+  "e_base_s1": {
+    "run": "runs/e_base_s1",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6896135265700483,
+      "octave": 0.9094202898550725,
+      "phase_exact": 5.866666666666674,
+      "phase_octave": 15.166666666666629,
+      "phase_p90": 273.77083333333337
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5385556915544676,
+      "octave": 0.8910648714810282
+    },
+    "macs": 76160
+  },
+  "e_music_s1": {
+    "run": "runs/e_music_s1",
+    "clips": {
+      "takes": 828,
+      "usable": 0.7004830917874396,
+      "octave": 0.8985507246376812,
+      "phase_exact": 6.104166666666515,
+      "phase_octave": 12.104166666666913,
+      "phase_p90": 269.97083333333336
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5299877600979193,
+      "octave": 0.8665850673194615
+    },
+    "macs": 76224
+  },
+  "e_down_soft": {
+    "run": "runs/e_down_soft",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6859903381642513,
+      "octave": 0.8985507246376812,
+      "phase_exact": 5.96249999999992,
+      "phase_octave": 12.104166666666913,
+      "phase_p90": 273.77083333333337
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5287637698898409,
+      "octave": 0.8812729498164015
+    },
+    "macs": 76288
+  },
+  "e_down_wide": {
+    "run": "runs/e_down_wide",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6473429951690821,
+      "octave": 0.8804347826086957,
+      "phase_exact": 6.241666666666617,
+      "phase_octave": 18.4375,
+      "phase_p90": 274.1333333333333
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5116279069767442,
+      "octave": 0.8788249694002448
+    },
+    "macs": 120576
+  },
+  "e_noaux_s1": {
+    "run": "runs/e_noaux_s1",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6799516908212561,
+      "octave": 0.9057971014492754,
+      "phase_exact": 6.600000000000023,
+      "phase_octave": 15.5,
+      "phase_p90": 271.5004166666665
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5250917992656059,
+      "octave": 0.8824969400244798
+    },
+    "macs": 75904
+  },
+  "fast-music": {
+    "run": "runs/f_music",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6727053140096618,
+      "octave": 0.8756038647342995,
+      "phase_exact": 6.035416666666663,
+      "phase_octave": 16.22916666666663,
+      "phase_p90": 277.625
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5312117503059975,
+      "octave": 0.8751529987760098
+    },
+    "macs": 76224
+  },
+  "fast-music-s1": {
+    "run": "runs/f_music_s1",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6896135265700483,
+      "octave": 0.8840579710144928,
+      "phase_exact": 5.566666666666663,
+      "phase_octave": 12.104166666666913,
+      "phase_p90": 269.2999999999997
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5263157894736842,
+      "octave": 0.8824969400244798
+    },
+    "macs": 76224
+  },
+  "fast-music-s2": {
+    "run": "runs/f_music_s2",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6835748792270532,
+      "octave": 0.9057971014492754,
+      "phase_exact": 5.866666666666674,
+      "phase_octave": 15.166666666666629,
+      "phase_p90": 273.77083333333337
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5312117503059975,
+      "octave": 0.8861689106487148
+    },
+    "macs": 76224
+  },
+  "music-silence": {
+    "run": "runs/f_music_sil",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6268115942028986,
+      "octave": 0.8804347826086957,
+      "phase_exact": 6.633333333333326,
+      "phase_octave": 16.266666666666595,
+      "phase_p90": 277.625
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5165238678090576,
+      "octave": 0.8824969400244798
+    },
+    "macs": 76224
+  },
+  "music-loops": {
+    "run": "runs/f_music_loops",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6388888888888888,
+      "octave": 0.8731884057971014,
+      "phase_exact": 6.174999999999926,
+      "phase_octave": 15.166666666666629,
+      "phase_p90": 277.625
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5238678090575275,
+      "octave": 0.8800489596083231
+    },
+    "macs": 76224
+  },
+  "music-both": {
+    "run": "runs/f_music_both",
+    "clips": {
+      "takes": 828,
+      "usable": 0.678743961352657,
+      "octave": 0.892512077294686,
+      "phase_exact": 6.241666666666617,
+      "phase_octave": 15.333333333333314,
+      "phase_p90": 276.40916666666675
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5250917992656059,
+      "octave": 0.8702570379436965
+    },
+    "macs": 76224
+  },
+  "mboth-p0.3": {
+    "run": "runs/f_mboth_p03",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6908212560386473,
+      "octave": 0.8961352657004831,
+      "phase_exact": 5.866666666666674,
+      "phase_octave": 15.166666666666629,
+      "phase_p90": 274.19083333333333
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5422276621787026,
+      "octave": 0.8996328029375765
+    },
+    "macs": 76224
+  },
+  "mboth-p0.3-s1": {
+    "run": "runs/f_mboth_p03_s1",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6908212560386473,
+      "octave": 0.894927536231884,
+      "phase_exact": 5.600000000000023,
+      "phase_octave": 12.104166666666913,
+      "phase_p90": 273.77083333333337
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5226438188494492,
+      "octave": 0.8788249694002448
+    },
+    "macs": 76224
+  },
+  "music-both-s1": {
+    "run": "runs/f_music_both_s1",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6714975845410628,
+      "octave": 0.8864734299516909,
+      "phase_exact": 6.037500000000023,
+      "phase_octave": 15.166666666666629,
+      "phase_p90": 273.77083333333337
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5348837209302325,
+      "octave": 0.8873929008567931
+    },
+    "macs": 76224
+  },
+  "hicut-s0": {
+    "run": "runs/h_hicut_s0",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6859903381642513,
+      "octave": 0.894927536231884,
+      "phase_exact": 6.037500000000023,
+      "phase_octave": 12.104166666666913,
+      "phase_p90": 273.17083333333335
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5177478580171359,
+      "octave": 0.8812729498164015
+    },
+    "macs": 76160
+  },
+  "hicut-s1": {
+    "run": "runs/h_hicut_s1",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6847826086956522,
+      "octave": 0.9130434782608695,
+      "phase_exact": 5.600000000000023,
+      "phase_octave": 15.166666666666629,
+      "phase_p90": 271.5708333333333
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5238678090575275,
+      "octave": 0.8812729498164015
+    },
+    "macs": 76160
+  },
+  "open-s0": {
+    "run": "runs/h_open_s0",
+    "clips": {
+      "takes": 828,
+      "usable": 0.6243961352657005,
+      "octave": 0.9094202898550725,
+      "phase_exact": 6.633333333333326,
+      "phase_octave": 20.731250000000003,
+      "phase_p90": 283.73333333333335
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5250917992656059,
+      "octave": 0.8959608323133414
+    },
+    "macs": 76160
+  },
+  "open-s1": {
+    "run": "runs/h_open_s1",
+    "clips": {
+      "takes": 828,
+      "usable": 0.678743961352657,
+      "octave": 0.9070048309178744,
+      "phase_exact": 6.241666666666617,
+      "phase_octave": 14.520833333333286,
+      "phase_p90": 277.625
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5263157894736842,
+      "octave": 0.8886168910648715
+    },
+    "macs": 76160
+  },
+  "newdb-s0@old": {
+    "run": "runs/g_music2_s0",
+    "clips": {
+      "takes": 828,
+      "usable": 0.7089371980676329,
+      "octave": 0.8900966183574879,
+      "phase_exact": 5.333333333333371,
+      "phase_octave": 12.104166666666913,
+      "phase_p90": 276.1158333333333
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5385556915544676,
+      "octave": 0.8984088127294981
+    },
+    "macs": 76224
+  },
+  "newdb-s1@old": {
+    "run": "runs/g_music2_s1",
+    "clips": {
+      "takes": 828,
+      "usable": 0.7065217391304348,
+      "octave": 0.892512077294686,
+      "phase_exact": 6.041666666666572,
+      "phase_octave": 15.166666666666629,
+      "phase_p90": 273.77083333333337
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5593635250917993,
+      "octave": 0.9045287637698899
+    },
+    "macs": 76224
+  },
+  "olddb-s0@new": {
+    "run": "runs/f_mboth_p03",
+    "clips": {
+      "takes": 945,
+      "usable": 0.6105820105820106,
+      "octave": 0.8677248677248677,
+      "phase_exact": 5.622916666666697,
+      "phase_octave": 218.2083333333333,
+      "phase_p90": 277.625
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5410036719706243,
+      "octave": 0.8996328029375765
+    },
+    "macs": 76224
+  },
+  "olddb-s1@new": {
+    "run": "runs/f_mboth_p03_s1",
+    "clips": {
+      "takes": 945,
+      "usable": 0.6201058201058202,
+      "octave": 0.8687830687830688,
+      "phase_exact": 5.333333333333343,
+      "phase_octave": 222.52083333333331,
+      "phase_p90": 279.4666666666667
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5201958384332925,
+      "octave": 0.8788249694002448
+    },
+    "macs": 76224
+  },
+  "newdb-s0@new": {
+    "run": "runs/g_music2_s0",
+    "clips": {
+      "takes": 945,
+      "usable": 0.6328042328042328,
+      "octave": 0.8751322751322751,
+      "phase_exact": 6.104166666666515,
+      "phase_octave": 225.40416666666664,
+      "phase_p90": 280.06833333333327
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5397796817625459,
+      "octave": 0.9008567931456548
+    },
+    "macs": 76224
+  },
+  "newdb-s1@new": {
+    "run": "runs/g_music2_s1",
+    "clips": {
+      "takes": 945,
+      "usable": 0.617989417989418,
+      "octave": 0.8687830687830688,
+      "phase_exact": 5.96249999999992,
+      "phase_octave": 258.36666666666656,
+      "phase_p90": 280.5333333333333
+    },
+    "loops": {
+      "takes": 817,
+      "tempo": 0.5593635250917993,
+      "octave": 0.9033047735618115
+    },
+    "macs": 76224
+  }
+}

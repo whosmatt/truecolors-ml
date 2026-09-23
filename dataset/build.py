@@ -47,12 +47,15 @@ def main():
     ap.add_argument("--ir", type=Path, default=augment.IR_PATH)
     ap.add_argument("--no-comb", action="store_true", help="build without the coil-whine comb")
     ap.add_argument("--no-hicut", action="store_true", help="build without the 4 kHz hi-cut")
+    ap.add_argument("--db", type=Path, default=None,
+                    help="Live index to read clips from; a saved copy pins the clip set, "
+                         "since the manifest only covers one-shots and loops")
     ap.add_argument("--laser-off", action="store_true",
                     help="inject the quiet mic floor instead of coil whine")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
 
-    lib = Library()
+    lib = Library(a.db) if a.db else Library()
     pools = render.pools_from_manifest(a.manifest)
     beds = {} if a.no_backing else render.backing_pool(a.manifest)
     if not a.no_augment:
@@ -62,8 +65,9 @@ def main():
     print("backing tempos:", len(beds))
 
     ids = alc.drum_clips(lib)[: a.limit or None]
-    acc = {s: {"X": [], "y": [], "off": [], "take": [], "notch": [],
-               "beat": [], "beat_off": []} for s, _ in SPLITS}
+    acc = {s: {"X": [], "y": [], "off": [], "take": [], "notch": [], "beat": [],
+               "beat_off": [], "downbeat": [], "downbeat_off": [], "phrase": [],
+               "music": []} for s, _ in SPLITS}
     takes, skipped, t0 = 0, 0, time.time()
     bed_cache: dict[str, np.ndarray] = {}
 
@@ -119,6 +123,15 @@ def main():
                 beat, beat_off = features.label_blocks(
                     len(X), bt.astype(np.int64), np.zeros(len(bt), dtype=np.int8), 1
                 )
+                # Downbeats, assuming 4/4: 99.9% of clip loop lengths are a whole
+                # number of 4-beat bars, and none are a multiple of 3 but not 4.
+                db = bt[::4]
+                downbeat, downbeat_off = features.label_blocks(
+                    len(X), db.astype(np.int64), np.zeros(len(db), dtype=np.int8), 1
+                )
+                # Length of the repeating pattern, in beats. The firmware asked
+                # for this: the grid has no concept of a loop without it.
+                phrase = np.full((len(X), 1), float(round(clip.beats)), dtype=np.float32)
                 # Explicit "nothing here" channel: without it the only negative
                 # signal is the absence of a positive.
                 none = (y.sum(axis=1, keepdims=True) == 0).astype(np.float32)
@@ -127,6 +140,8 @@ def main():
                 skip = int(render.AGC_SETTLE_S * SR / BLOCK_SAMPLES)
                 X, y, off = X[skip:], y[skip:], off[skip:]
                 beat, beat_off = beat[skip:], beat_off[skip:]
+                downbeat, downbeat_off = downbeat[skip:], downbeat_off[skip:]
+                phrase = phrase[skip:]
                 if not len(X):
                     continue
                 d = acc[split]
@@ -135,6 +150,10 @@ def main():
                 d["off"].append(off)
                 d["beat"].append(beat)
                 d["beat_off"].append(beat_off)
+                d["downbeat"].append(downbeat)
+                d["downbeat_off"].append(downbeat_off)
+                d["phrase"].append(phrase)
+                d["music"].append(np.ones((len(X), 1), dtype=np.float32))
                 d["take"].append(np.full(len(X), takes, dtype=np.int32))
                 d["notch"].append(np.full(len(X), notch, dtype=np.int16))
                 takes += 1
@@ -146,6 +165,8 @@ def main():
         "manifest_sha256": hashlib.sha256(a.manifest.read_bytes()).hexdigest(),
         "classes": list(DETECTION_CLASSES),
         "beat_labels": True,
+        "downbeat_labels": True,
+        "music_labels": True,
         "takes": takes,
         "clips_skipped": skipped,
         "seconds_per_take": a.seconds,

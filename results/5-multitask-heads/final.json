@@ -1,0 +1,104 @@
+{
+ "gate": {
+  "v1: music head": {
+   "rendered kept": [
+    97.19416386083053,
+    97.53086419753086
+   ],
+   "real loops kept": [
+    75.4320987654321,
+    76.29629629629629
+   ],
+   "non-music rejected": [
+    72.91666666666666,
+    73.75
+   ],
+   "silence rejected": [
+    14.285714285714285,
+    14.285714285714285
+   ]
+  },
+  "+ silence is not music": {
+   "rendered kept": [
+    89.00112233445566
+   ],
+   "real loops kept": [
+    75.55555555555556
+   ],
+   "non-music rejected": [
+    74.58333333333333
+   ],
+   "silence rejected": [
+    100.0
+   ]
+  },
+  "+ real loops as music": {
+   "rendered kept": [
+    96.40852974186308
+   ],
+   "real loops kept": [
+    96.04938271604938
+   ],
+   "non-music rejected": [
+    60.416666666666664
+   ],
+   "silence rejected": [
+    7.142857142857142
+   ]
+  },
+  "+ both": {
+   "rendered kept": [
+    90.46015712682379,
+    89.56228956228956
+   ],
+   "real loops kept": [
+    96.29629629629629,
+    96.29629629629629
+   ],
+   "non-music rejected": [
+    60.83333333333333,
+    61.25000000000001
+   ],
+   "silence rejected": [
+    92.85714285714286,
+    92.85714285714286
+   ]
+  },
+  "+ both, music weight 0.3": {
+   "rendered kept": [
+    76.99214365881033,
+    78.11447811447812
+   ],
+   "real loops kept": [
+    86.91358024691358,
+    87.53086419753086
+   ],
+   "non-music rejected": [
+    85.41666666666666,
+    85.0
+   ],
+   "silence rejected": [
+    100.0,
+    100.0
+   ]
+  },
+  "v2: + both, weight 0.3, 2026-09-24 index": {
+   "rendered kept": [
+    79.42028985507247,
+    79.61352657004831
+   ],
+   "real loops kept": [
+    88.27160493827161,
+    88.39506172839506
+   ],
+   "non-music rejected": [
+    86.66666666666667,
+    85.83333333333333
+   ],
+   "silence rejected": [
+    100.0,
+    100.0
+   ]
+  }
+ }
+}

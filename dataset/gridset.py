@@ -88,7 +88,7 @@ def take(row: dict, rng: np.random.Generator, notch: int, hicut: bool = True):
     wet = augment.apply_ir(tiled)
     dbfs = float(rng.uniform(*render.LEVEL_DBFS))
     y = augment.finish(wet, notch, rng, dbfs=dbfs)
-    X = features.featurise((y * 32767.0).astype(np.int16), notch, comb=False, hicut=hicut)
+    X = features.featurise((y * 32767.0).astype(np.int16), hicut=hicut)
 
     hit = np.zeros((len(X), 1), dtype=np.float32)
     frac = np.zeros((len(X), 1), dtype=np.float32)
@@ -146,7 +146,7 @@ def main():
         "takes": n,
         "take_seconds": TAKE_S,
         "settle_s": SETTLE_S,
-        **features.spec(comb=False, hicut=True),
+        **features.spec(hicut=True),
     }
     for s, _ in SPLITS:
         d = acc[s]

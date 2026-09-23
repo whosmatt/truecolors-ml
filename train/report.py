@@ -258,7 +258,7 @@ def tempo_results(run: Path, manifest: str, n: int, notch: int) -> list[dict]:
         pcm, true_phase = tempo.take_from_loop(row, rng, notch)
         if pcm is None:
             continue
-        X = feat.featurise(pcm, notch, comb=False, hicut=True)
+        X = feat.featurise(pcm, hicut=True)
         if len(X) <= skip + 400:
             continue
         hit = activations(X, model, mean, scale)

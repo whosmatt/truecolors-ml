@@ -71,7 +71,7 @@ def main():
     meta = {"built": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "source": "BPM-verified drum loops, period label only",
             "masked": ["y", "off", "beat", "beat_off"], "takes": n,
-            **features.spec(comb=False, hicut=not a.no_hicut)}
+            **features.spec(hicut=not a.no_hicut)}
     for s, _ in gridset.SPLITS:
         d = acc[s]
         if not d["X"]:

@@ -34,7 +34,6 @@ def main():
     ap.add_argument("--manifest", default="data/manifest.jsonl")
     ap.add_argument("--n", type=int, default=300)
     ap.add_argument("--notch", type=int, default=480)
-    ap.add_argument("--no-comb", action="store_true", default=True)
     a = ap.parse_args()
 
     model = keras.models.load_model(a.run / "model.keras", compile=False)
@@ -56,7 +55,7 @@ def main():
         pcm, true_phase = tempo.take_from_loop(row, rng, a.notch)
         if pcm is None:
             continue
-        X = feat.featurise(pcm, a.notch, comb=not a.no_comb, hicut=True)
+        X = feat.featurise(pcm, hicut=True)
         if len(X) <= skip + 400:
             continue
         hit = activations(X, model, mean, scale)

@@ -45,7 +45,6 @@ def main():
     ap.add_argument("--no-augment", action="store_true",
                     help="skip the IR and whine; dry renders only")
     ap.add_argument("--ir", type=Path, default=augment.IR_PATH)
-    ap.add_argument("--no-comb", action="store_true", help="build without the coil-whine comb")
     ap.add_argument("--no-hicut", action="store_true", help="build without the 4 kHz hi-cut")
     ap.add_argument("--db", type=Path, default=None,
                     help="Live index to read clips from; a saved copy pins the clip set, "
@@ -109,7 +108,7 @@ def main():
                 else:
                     y = augment.finish(wet, None if a.laser_off else notch, rng, dbfs=dbfs)
                     pcm = (y * 32767.0).astype(np.int16)
-                X = features.featurise(pcm, notch, comb=not a.no_comb, hicut=not a.no_hicut)
+                X = features.featurise(pcm, hicut=not a.no_hicut)
                 y, off = features.label_blocks(
                     len(X), r.onsets, r.classes, len(DETECTION_CLASSES)
                 )
@@ -179,7 +178,7 @@ def main():
         "ir": None if a.no_augment else str(a.ir),
         "ir_sha256": None if a.no_augment or not a.ir.exists()
                      else hashlib.sha256(a.ir.read_bytes()).hexdigest(),
-        **features.spec(comb=not a.no_comb, hicut=not a.no_hicut),
+        **features.spec(hicut=not a.no_hicut),
     }
     for s, _ in SPLITS:
         d = acc[s]

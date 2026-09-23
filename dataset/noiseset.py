@@ -88,8 +88,7 @@ def take(row: dict | None, rng: np.random.Generator, notch: int):
         wet = augment.apply_ir(tiled)
     dbfs = float(rng.uniform(*render.LEVEL_DBFS))
     y = augment.finish(wet, notch, rng, dbfs=dbfs)
-    return features.featurise((y * 32767.0).astype(np.int16), notch,
-                              comb=False, hicut=True)
+    return features.featurise((y * 32767.0).astype(np.int16), hicut=True)
 
 
 def main():
@@ -136,7 +135,7 @@ def main():
     meta = {"built": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "source": "non-music: speech, foley, atmosphere, sound fx, plus silence",
             "tags": list(NON_MUSIC_TAGS), "silent_fraction": SILENT_FRACTION,
-            "takes": n, **features.spec(comb=False, hicut=True)}
+            "takes": n, **features.spec(hicut=True)}
     for s, _ in gridset.SPLITS:
         d = acc[s]
         if not d["X"]:

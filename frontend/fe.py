@@ -32,8 +32,10 @@ def truecolors_root() -> Path:
 
 def _build(root: Path, defines: tuple[str, ...] = ()) -> Path:
     """Build one filter variant. Each gets its own .so, keyed by its defines."""
-    src = [root / "components/audio/frontend.c", _HERE / "shim.c"]
     inc = root / "components/audio/include"
+    # The header counts: a bumped struct or constant with an untouched .c must
+    # still rebuild.
+    src = [root / "components/audio/frontend.c", _HERE / "shim.c", inc / "frontend.h"]
     tag = "".join("_" + d.lower().replace("fe_no_", "no") for d in sorted(defines))
     out = _HERE / "build" / f"libfe{tag}.so"
     out.parent.mkdir(exist_ok=True)
@@ -41,7 +43,7 @@ def _build(root: Path, defines: tuple[str, ...] = ()) -> Path:
         subprocess.run(
             ["cc", "-O2", "-fPIC", "-shared", "-std=c99", f"-I{inc}",
              *[f"-D{d}" for d in defines],
-             *[str(s) for s in src], "-lm", "-o", str(out)],
+             *[str(s) for s in src if s.suffix == ".c"], "-lm", "-o", str(out)],
             check=True,
         )
     return out
@@ -70,8 +72,7 @@ def _load(defines: tuple[str, ...] = ()) -> ctypes.CDLL:
     for fn in ("fe_spec_version", "fe_block_samples", "fe_sample_rate"):
         getattr(lib, fn).restype = ctypes.c_int
     lib.fe_variant.restype = ctypes.c_uint32
-    lib.fe_init.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-    lib.fe_set_notch_hz.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    lib.fe_init.argtypes = [ctypes.c_void_p]
     lib.fe_run.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
     return lib
 
@@ -116,25 +117,22 @@ def variant_name(mask: int) -> str:
 class Frontend:
     """One front-end instance. Stateful across run() calls.
 
-    `comb` and `hicut` select a filter variant, compiled from the same firmware
-    source with -DFE_NO_COMB / -DFE_NO_HICUT. The variant mask must be recorded
-    alongside fe_spec_version: a model trained against one variant is not valid
-    against another, and the mismatch is silent.
+    `hicut` selects a filter variant, compiled from the same firmware source with
+    -DFE_NO_HICUT. The variant mask must be recorded alongside fe_spec_version: a
+    model trained against one variant is not valid against another, and the
+    mismatch is silent. v2 has no comb; v1 without it is bit-identical.
     """
 
-    def __init__(self, notch_hz: int = 480, comb: bool = True, hicut: bool = True):
-        defines = tuple(
-            d for d, on in (("FE_NO_COMB", comb), ("FE_NO_HICUT", hicut)) if not on
-        )
+    def __init__(self, comb: bool = False, hicut: bool = True):
+        if comb:
+            raise ValueError(f"FE_SPEC_VERSION {SPEC_VERSION} has no comb")
+        defines = () if hicut else ("FE_NO_HICUT",)
         if defines not in _LIBS:
             _LIBS[defines] = _load(defines)
         self._lib = _LIBS[defines]
         self.variant = int(self._lib.fe_variant())
         self._st = ctypes.create_string_buffer(self._lib.fe_state_size())
-        self._lib.fe_init(self._st, notch_hz)
-
-    def set_notch_hz(self, hz: int):
-        self._lib.fe_set_notch_hz(self._st, hz)
+        self._lib.fe_init(self._st)
 
     def run(self, samples: np.ndarray) -> np.ndarray:
         """int16 mono at SAMPLE_RATE -> (n_blocks,) structured array of features.

@@ -74,7 +74,7 @@ def main():
         wet = augment.apply_ir(r.audio)
         dbfs = float(rng.uniform(*render.LEVEL_DBFS))
         y = augment.finish(wet, a.notch, rng, dbfs=dbfs)
-        X = features.featurise((y * 32767.0).astype(np.int16), a.notch)
+        X = features.featurise((y * 32767.0).astype(np.int16))
         skip = int(render.AGC_SETTLE_S * 48000 / 512)
 
         pred = m.predict(_windows(X, mean, scale), verbose=0)

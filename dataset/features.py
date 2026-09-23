@@ -4,8 +4,10 @@ Features come from the firmware's own C front end via `frontend.fe`, never a
 numpy reimplementation — the comb, hi-cut and per-band AGC are stateful and a
 reimplementation would drift from the device invisibly.
 
-The laser PWM frequency moves the comb notch at runtime, so every take is
-featurised once per supported setting and the notch is carried as an input.
+The laser PWM setting changes the coil whine, so every take is rendered once
+per setting with that setting's measured whine mixed in (`augment`), and the
+setting is carried as `notch`. The front end itself no longer depends on it:
+v2 removed the comb.
 """
 
 import numpy as np
@@ -26,7 +28,7 @@ FEATURE_ORDER = (
     "spl_db",
 )
 N_FEATURES = len(FEATURE_ORDER)
-NOTCH_HZ = (120, 240, 480)  # runtime-adjustable; dataset must cover all three
+NOTCH_HZ = (120, 240, 480)  # PWM settings with a measured whine capture
 
 
 def flatten(blocks: np.ndarray) -> np.ndarray:
@@ -43,10 +45,8 @@ def flatten(blocks: np.ndarray) -> np.ndarray:
     return out
 
 
-def featurise(
-    pcm16: np.ndarray, notch_hz: int, comb: bool = True, hicut: bool = True
-) -> np.ndarray:
-    fe = Frontend(notch_hz=notch_hz, comb=comb, hicut=hicut)
+def featurise(pcm16: np.ndarray, comb: bool = False, hicut: bool = True) -> np.ndarray:
+    fe = Frontend(comb=comb, hicut=hicut)
     return flatten(fe.run(pcm16))
 
 
@@ -72,7 +72,7 @@ def label_blocks(
     return hit, off
 
 
-def spec(comb: bool = True, hicut: bool = True) -> dict:
+def spec(comb: bool = False, hicut: bool = True) -> dict:
     """Provenance for model_meta.json.
 
     `fe_variant` is as load-bearing as `fe_spec_version`: a model trained against

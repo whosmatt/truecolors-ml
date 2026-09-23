@@ -94,7 +94,7 @@ def main():
             pcm, _ = tempo.take_from_loop(row, rng, a.notch)
             if pcm is None:
                 continue
-            X = feat.featurise(pcm, a.notch, comb=False, hicut=True)
+            X = feat.featurise(pcm, hicut=True)
             if len(X) <= skip + spec.lookback + 200:
                 continue
             aa = loop_activation(name, run, key, X, spec)[skip:]

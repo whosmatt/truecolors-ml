@@ -174,6 +174,12 @@ if __name__ == "__main__":
 # within 2% of a beat. Using the loop start as the grid anchor regardless would
 # put ~40% of labels on the wrong phase — and would equally corrupt any phase
 # metric measured against it. So each loop is checked against its own audio.
+#
+# Superseded 2026-09-24: models trained only on rendered clips put 75% of the
+# tempo-exact drum test loops within an eighth of a beat of the file-start grid
+# (median 7.7 ms, their own rendered-clip error) and 13% a half beat off, their
+# known failure. The "third" above measured this comb, not the loops. File-start
+# labels: `python -m dataset.loopset --grid`.
 
 PHASE_CACHE = Path("cache/grid_phase.json")
 HOP = 48  # 1 ms onset-strength hop

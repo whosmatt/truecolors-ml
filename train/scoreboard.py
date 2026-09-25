@@ -44,6 +44,13 @@ def activation(model, split, mean, scale, spec, key="beat") -> np.ndarray:
     return a, out, c
 
 
+def run_spec(run: Path) -> mres.Spec:
+    try:
+        return mres.Spec(**json.loads((run / "result.json").read_text())["spec"])
+    except (FileNotFoundError, KeyError):
+        return mres.Spec()
+
+
 def score_clips(model, te, mean, scale, spec) -> dict:
     a, _, _ = activation(model, te, mean, scale, spec)
     return gridmetrics.per_take(a, te)
@@ -83,9 +90,10 @@ def main():
         label = label or Path(run).name
         model = keras.models.load_model(Path(run) / "model.keras", compile=False)
         nz = np.load(Path(run) / "norm.npz")
-        entry = {"run": run, "clips": score_clips(model, te, nz["mean"], nz["scale"], spec)}
+        sp = run_spec(Path(run))
+        entry = {"run": run, "clips": score_clips(model, te, nz["mean"], nz["scale"], sp)}
         if lo is not None:
-            entry["loops"] = score_loops(model, lo, nz["mean"], nz["scale"], spec)
+            entry["loops"] = score_loops(model, lo, nz["mean"], nz["scale"], sp)
         try:
             entry["macs"] = json.loads((Path(run) / "result.json").read_text())["macs"]
         except Exception:

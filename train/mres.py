@@ -29,6 +29,8 @@ class Spec:
     mid_stride: int = 4
     coarse_frames: int = 12
     coarse_stride: int = 16
+    mid_pool: str = "mean"     # see POOLS
+    coarse_pool: str = "mean"
 
     @property
     def lookback(self) -> int:
@@ -42,6 +44,26 @@ class Spec:
     def seconds(self, block_ms: float) -> float:
         return self.lookback * block_ms / 1000.0
 
+    def views(self):
+        """-> [(kind, stride, offsets)], in input order: fine, mid views, coarse views."""
+        mid0 = -self.fine_past
+        crs0 = mid0 - self.mid_frames * self.mid_stride
+        out = [("fine", 1, np.arange(-self.fine_past, self.fine_future + 1))]
+        for pool, nf, st, base in ((self.mid_pool, self.mid_frames, self.mid_stride, mid0),
+                                   (self.coarse_pool, self.coarse_frames, self.coarse_stride, crs0)):
+            for kind in POOLS[pool]:
+                out.append((kind, st, base - np.arange(nf) * st))
+        return out
+
+    def width(self, n_features: int) -> int:
+        return sum(len(o) for _, _, o in self.views()) * n_features
+
+
+# A pooled frame covers X[j-stride:j]. The mean keeps level and loses timing;
+# max keeps an onset's peak; pos is where inside the frame the peak sat, 0..1.
+POOLS = {"mean": ("mean",), "max": ("max",), "meanmax": ("mean", "max"),
+         "maxpos": ("max", "pos")}
+
 
 def valid_centres(take: np.ndarray, spec: Spec) -> np.ndarray:
     """Centres whose whole context lies inside one take."""
@@ -54,7 +76,8 @@ def valid_centres(take: np.ndarray, spec: Spec) -> np.ndarray:
 
 
 def gather(X: np.ndarray, csum: np.ndarray, centres: np.ndarray, spec: Spec) -> np.ndarray:
-    """-> (len(centres), frames * n_features), fine to coarse."""
+    """-> (len(centres), frames * n_features), fine to coarse. Mean pools only."""
+    assert spec.mid_pool == spec.coarse_pool == "mean", "use MResWindows for other pools"
     parts = [X[centres[:, None] + np.arange(-spec.fine_past, spec.fine_future + 1)]]
     base = centres - spec.fine_past
     for nf, st in ((spec.mid_frames, spec.mid_stride),
@@ -72,11 +95,24 @@ def cumsum(X: np.ndarray) -> np.ndarray:
                            np.cumsum(X, axis=0, dtype=np.float64)], axis=0)
 
 
-def pooled(X: np.ndarray, stride: int) -> np.ndarray:
-    """P[j] = mean(X[j-stride:j]); rows below stride are zero and never gathered."""
-    c = cumsum(X)
+def pooled(X: np.ndarray, stride: int, kind: str = "mean") -> np.ndarray:
+    """P[j] = pool(X[j-stride:j]); rows below stride are zero and never gathered.
+
+    Max commutes with the positive per-feature normaliser, so pooling the
+    normalised frames is exact for every kind.
+    """
     out = np.zeros(X.shape, dtype=np.float32)
-    out[stride:] = (c[stride:-1] - c[:-stride - 1]) / stride
+    if kind == "fine":
+        return X.astype(np.float32)
+    if kind == "mean":
+        c = cumsum(X)
+        out[stride:] = (c[stride:-1] - c[:-stride - 1]) / stride
+        return out
+    w = np.lib.stride_tricks.sliding_window_view(X, stride, axis=0)[:-1]  # (N-stride, F, stride)
+    for a in range(0, len(w), 1 << 20):
+        blk = w[a:a + (1 << 20)]
+        out[stride + a:stride + a + len(blk)] = (
+            blk.max(axis=-1) if kind == "max" else blk.argmax(axis=-1) / max(stride - 1, 1))
     return out
 
 
@@ -93,12 +129,9 @@ class MResWindows(keras.utils.PyDataset):
         super().__init__(**kw)
         self.s, self.spec, self.targets, self.batch = split, spec, targets, batch
         Xn = ((split.X - mean) / scale).astype(np.float32)
-        self.pools = (Xn, pooled(Xn, spec.mid_stride), pooled(Xn, spec.coarse_stride))
-        mid0 = -spec.fine_past
-        crs0 = mid0 - spec.mid_frames * spec.mid_stride
-        self.offsets = (np.arange(-spec.fine_past, spec.fine_future + 1),
-                        mid0 - np.arange(spec.mid_frames) * spec.mid_stride,
-                        crs0 - np.arange(spec.coarse_frames) * spec.coarse_stride)
+        views = spec.views()
+        self.pools = [pooled(Xn, st, k) for k, st, _ in views]
+        self.offsets = [o for _, _, o in views]
         self.order = valid_centres(split.take, spec)
         self.shuffle = shuffle
         self.rng = np.random.default_rng(seed)

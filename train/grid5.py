@@ -75,16 +75,33 @@ def main():
                     help="loss weight for the downbeat head")
     ap.add_argument("--downbeat-pos", type=float, default=None,
                     help="positive weight for downbeats; default 4x --pos-weight")
+    ap.add_argument("--fine-past", type=int, default=13)
+    ap.add_argument("--mid", type=int, nargs=2, default=[16, 4], metavar=("FRAMES", "STRIDE"))
+    ap.add_argument("--coarse", type=int, nargs=2, default=[12, 16], metavar=("FRAMES", "STRIDE"))
+    ap.add_argument("--mid-pool", default="mean", choices=sorted(mres.POOLS))
+    ap.add_argument("--coarse-pool", default="mean", choices=sorted(mres.POOLS))
+    ap.add_argument("--extra", type=Path, action="append", default=[],
+                    help="more beat-labelled corpora, e.g. loops built with --grid; repeatable")
+    ap.add_argument("--melodic", type=Path, default=None,
+                    help="tempo-only loops, trained with the phase-marginalised beat loss")
+    ap.add_argument("--mil-weight", type=float, default=1.0)
+    ap.add_argument("--mil-segments", type=int, default=8, help="segments per step")
+    ap.add_argument("--mil-len", type=int, default=512, help="centres per segment")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps-per-execution", type=int, default=32)
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     keras.utils.set_random_seed(a.seed)
 
-    spec = mres.Spec()
+    spec = mres.Spec(fine_past=a.fine_past, mid_frames=a.mid[0], mid_stride=a.mid[1],
+                     coarse_frames=a.coarse[0], coarse_stride=a.coarse[1],
+                     mid_pool=a.mid_pool, coarse_pool=a.coarse_pool)
     meta = data.meta(a.clips)
     dirs = [a.clips] + ([a.noise] if a.music else [])
     fill = [{}] * len(dirs)
+    for d in a.extra:  # loops are music; they carry no music column of their own
+        dirs.append(d)
+        fill.append({"music": 1.0} if a.music else {})
     if a.music_loops:
         dirs.append(a.loops)
         fill.append({"music": 1.0})
@@ -128,12 +145,18 @@ def main():
         losses["music"] = model_mod.masked_bce(a.music_pos)
         weights["music"] = 1.0
 
-    m = build(spec.frames * len(meta["feature_order"]), tuple(a.hidden), heads)
+    m = build(spec.width(len(meta["feature_order"])), tuple(a.hidden), heads)
     print(f"heads {list(heads)} | train {len(tr.X):,} blocks | MACs {model_mod.macs(m):,}")
 
     t0 = time.time()
-    trainer = fast.Trainer(m, fast.Corpus(tr, mean, scale, spec, targets),
-                           fast.Corpus(va, mean, scale, spec, targets), a.batch, seed=a.seed)
+    trc, vac = (fast.Corpus(s_, mean, scale, spec, targets) for s_ in (tr, va))
+    if a.melodic:
+        from . import seq
+        seg = fast.Segments(data.load(a.melodic, "train"), mean, scale, spec, a.mil_len)
+        trainer = fast.MilTrainer(m, trc, vac, a.batch, seg, a.mil_segments,
+                                  seq.mil_bce(a.pos_weight), a.mil_weight, seed=a.seed)
+    else:
+        trainer = fast.Trainer(m, trc, vac, a.batch, seed=a.seed)
     trainer.compile(optimizer=keras.optimizers.Adam(a.lr), loss=losses,
                     loss_weights=weights, steps_per_execution=a.steps_per_execution,
                     jit_compile=True)
@@ -154,6 +177,9 @@ def main():
         "seed": a.seed, "aux": not a.no_aux, "downbeat": a.downbeat,
         "phrase": a.phrase, "music": a.music, "music_loops": a.music_loops,
         "music_silence": a.music_silence, "music_pos": a.music_pos,
+        "melodic": str(a.melodic) if a.melodic else None,
+        "extra": [str(d) for d in a.extra],
+        "mil": [a.mil_weight, a.mil_segments, a.mil_len] if a.melodic else None,
         "train_blocks": int(len(tr.X)), "minutes": (time.time() - t0) / 60,
         "fe_variant": meta.get("fe_variant"),
         "fe_spec_version": meta["fe_spec_version"],

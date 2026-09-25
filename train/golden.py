@@ -17,7 +17,7 @@ import keras
 import numpy as np
 import tensorflow as tf
 
-from . import data, mres
+from . import data, export, mres
 
 # Head order comes from the model, not a constant: a model with a music
 # head has four outputs and hardcoding three silently drops one.
@@ -121,7 +121,7 @@ def main():
         "fe_spec_version": meta["fe_spec_version"],
         "fe_variant": meta.get("fe_variant"),
         "output_order": heads,
-        "context": {**spec.__dict__, "frames": spec.frames,
+        "context": {**export.context_spec(spec.__dict__), "frames": spec.frames,
                     "inputs": spec.frames * 12, "lookback_blocks": spec.lookback,
                     "ring_blocks": spec.lookback + 1 + spec.fine_future},
         "frame_layout": [

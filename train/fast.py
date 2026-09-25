@@ -22,12 +22,9 @@ class Corpus:
 
     def __init__(self, split, mean, scale, spec: mres.Spec, targets):
         Xn = ((split.X - mean) / scale).astype(np.float32)
-        pools = (Xn, mres.pooled(Xn, spec.mid_stride), mres.pooled(Xn, spec.coarse_stride))
-        mid0 = -spec.fine_past
-        crs0 = mid0 - spec.mid_frames * spec.mid_stride
-        offs = (np.arange(-spec.fine_past, spec.fine_future + 1),
-                mid0 - np.arange(spec.mid_frames) * spec.mid_stride,
-                crs0 - np.arange(spec.coarse_frames) * spec.coarse_stride)
+        views = spec.views()
+        pools = [mres.pooled(Xn, st, k) for k, st, _ in views]
+        offs = [o for _, _, o in views]
         # Offsets are gathered from one stacked array, so a window is a single
         # gather: row = pool_index * N + centre + offset.
         n = len(Xn)
@@ -35,7 +32,7 @@ class Corpus:
         self.frames = tf.constant(np.concatenate(pools))
         self.offsets = tf.constant(np.concatenate(
             [k * n + o for k, o in enumerate(offs)]).astype(np.int64))
-        self.width = spec.frames * Xn.shape[1]
+        self.width = spec.width(Xn.shape[1])
         self.order = mres.valid_centres(split.take, spec)
         self.y = {k: tf.constant(v) for k, v in self._targets(split, targets).items()}
 
@@ -124,3 +121,54 @@ class Trainer(keras.Model):
 class Reshuffle(keras.callbacks.Callback):
     def on_epoch_begin(self, epoch, logs=None):
         self.model.reshuffle()
+
+
+class Segments:
+    """Tempo-only takes for the phase-marginalised beat loss: runs of `length`
+    consecutive centres from one take, windowed like any Corpus."""
+
+    def __init__(self, split, mean, scale, spec: mres.Spec, length: int):
+        self.c = Corpus(split, mean, scale, spec, ())
+        o = self.c.order
+        # a start is usable when `length` consecutive valid centres share its take
+        end = np.searchsorted(o, o + length - 1)
+        ok = (end < len(o)) & (o[np.minimum(end, len(o) - 1)] == o + length - 1)
+        ok &= split.take[np.minimum(o + length - 1, len(split.take) - 1)] == split.take[o]
+        self.starts = tf.constant(o[ok])
+        self.length = length
+        self.period = tf.constant(split.period[:, 0].astype(np.float32))
+        self.lanes = tf.range(length, dtype=tf.int64)
+
+    def sample(self, n):
+        k = tf.random.uniform((n,), 0, tf.shape(self.starts, out_type=tf.int64)[0], tf.int64)
+        c = tf.gather(self.starts, k)[:, None] + self.lanes[None, :]     # (n, length)
+        x, _ = self.c.fetch(tf.reshape(c, (-1,)))
+        P = tf.gather(self.period, c)[..., None]                          # (n, length, 1)
+        return x, P
+
+
+class MilTrainer(Trainer):
+    """Trainer plus a phase-marginalised beat loss on tempo-only segments."""
+
+    def __init__(self, net, train, val, batch, segments: Segments, n_segments: int,
+                 mil_loss, mil_weight: float, seed=0):
+        super().__init__(net, train, val, batch, seed=seed)
+        self.seg, self.n_seg, self.mil_loss, self.mil_weight = segments, n_segments, mil_loss, mil_weight
+        self.mil_tracker = keras.metrics.Mean(name="mil")
+
+    def train_step(self, i):
+        x, y = self._batch(self.tr, self.perm, i)
+        xs, P = self.seg.sample(self.n_seg)
+        with tf.GradientTape() as tape:
+            yp = self.net(x, training=True)
+            loss = self.compute_loss(x=x, y=y, y_pred=yp, training=True)
+            bs = self.net(xs, training=True)["beat"]
+            mil = self.mil_loss(P, tf.reshape(bs, (self.n_seg, self.seg.length, 1)))
+            total = loss + self.mil_weight * mil
+        self._loss_tracker.update_state(loss, sample_weight=self.batch)
+        self.mil_tracker.update_state(mil)
+        grads = tape.gradient(total, self.net.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads, self.net.trainable_variables))
+        out = self.compute_metrics(x, y, yp)
+        out["mil"] = self.mil_tracker.result()
+        return out

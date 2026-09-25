@@ -20,6 +20,12 @@ from . import data, evaluate, gridmetrics, mres, tempo
 from .grid3 import activation as act_float
 
 
+def context_spec(spec: dict) -> dict:
+    """The run's spec minus pool kinds left at their default: the firmware reads
+    only the six tier numbers, and mean pooling is what it implements."""
+    return {k: v for k, v in spec.items() if not (k.endswith("_pool") and v == "mean")}
+
+
 def representative(split, mean, scale, spec, n=500, batch=64, seed=0):
     ds = mres.MResWindows(split, mean, scale, spec, targets=(), batch=batch,
                           shuffle=True, seed=seed)
@@ -130,7 +136,7 @@ def main():
         "feature_order": meta["feature_order"],
         "block_samples": meta["block_samples"],
         "sample_rate": 48000,
-        "context": {**run["spec"], "frames": spec.frames,
+        "context": {**context_spec(run["spec"]), "frames": spec.frames,
                     "inputs": spec.frames * len(meta["feature_order"]),
                     "seconds": spec.seconds(evaluate.BLOCK_MS),
                     "lookback_blocks": spec.lookback,

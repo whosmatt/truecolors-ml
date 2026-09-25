@@ -68,12 +68,16 @@ def main():
     ap.add_argument("--clips", type=Path, default=Path("data/features3"))
     ap.add_argument("--loops", type=Path, default=Path("data/loops"))
     ap.add_argument("--noise", type=Path, default=Path("data/noise"))
+    ap.add_argument("--melodic", type=Path, default=None,
+                    help="loops without a Drums tag, scored as music")
     ap.add_argument("--tflite", type=Path, nargs="*", default=[],
                     help="one exported model per run, scored instead of the float model")
     a = ap.parse_args()
     spec = mres.Spec()
     corpora = {n: data.load(d, a.split) for n, d in
                (("clips", a.clips), ("loops", a.loops), ("noise", a.noise))}
+    if a.melodic:
+        corpora["melodic"] = data.load(a.melodic, a.split)
     for k, run in enumerate(a.runs):
         nz = np.load(run / "norm.npz")
         m = keras.models.load_model(run / "model.keras", compile=False)
@@ -88,7 +92,7 @@ def main():
                 groups["non-music"] = (med[lvl >= SILENT_DB], False)
                 groups["silence"] = (med[lvl < SILENT_DB], False)
             else:
-                groups["rendered" if n == "clips" else "real loops"] = (med, True)
+                groups[{"clips": "rendered", "loops": "real loops"}.get(n, n)] = (med, True)
         print(f"{run}{' int8' if a.tflite else ''}  (per-take median, {a.split})")
         print(f"  {'group':12} {'takes':>6} {'median':>7}  " +
               "  ".join(f"@{t}" for t in THRESHOLDS) + "   (% on the correct side)")

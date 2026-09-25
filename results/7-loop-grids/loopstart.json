@@ -1,0 +1,98 @@
+{
+ "loops_grid:runs/e_base": {
+  "takes": 659,
+  "tempo_exact": 339,
+  "within_25ms": 0.7138643067846607,
+  "median_ms": 7.6875,
+  "eighths": [
+   253,
+   10,
+   8,
+   1,
+   44,
+   4,
+   9,
+   10
+  ]
+ },
+ "loops_grid:runs/i_ctrl_s0": {
+  "takes": 659,
+  "tempo_exact": 349,
+  "within_25ms": 0.6962750716332379,
+  "median_ms": 8.548369344075484,
+  "eighths": [
+   250,
+   12,
+   6,
+   1,
+   56,
+   4,
+   12,
+   8
+  ]
+ },
+ "loops_grid:runs/i_ctrl_s1": {
+  "takes": 659,
+  "tempo_exact": 335,
+  "within_25ms": 0.7104477611940299,
+  "median_ms": 7.0749999999999975,
+  "eighths": [
+   251,
+   11,
+   3,
+   0,
+   50,
+   2,
+   13,
+   5
+  ]
+ },
+ "melodic_grid:runs/e_base": {
+  "takes": 473,
+  "tempo_exact": 169,
+  "within_25ms": 0.5680473372781065,
+  "median_ms": 18.195833333333333,
+  "eighths": [
+   98,
+   14,
+   8,
+   8,
+   28,
+   5,
+   4,
+   4
+  ]
+ },
+ "melodic_grid:runs/i_ctrl_s0": {
+  "takes": 473,
+  "tempo_exact": 177,
+  "within_25ms": 0.5480225988700564,
+  "median_ms": 18.95512819290161,
+  "eighths": [
+   102,
+   16,
+   5,
+   2,
+   34,
+   6,
+   9,
+   3
+  ]
+ },
+ "melodic_grid:runs/i_ctrl_s1": {
+  "takes": 473,
+  "tempo_exact": 168,
+  "within_25ms": 0.5535714285714286,
+  "median_ms": 19.1217260996501,
+  "eighths": [
+   97,
+   11,
+   9,
+   1,
+   29,
+   12,
+   5,
+   4
+  ]
+ }
+}

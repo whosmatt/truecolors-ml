@@ -88,3 +88,8 @@ Beat detection performance is rock solid on 4-on-the-floor genres and performs r
 Music detection is not performing well yet.
 
 Causal TCN, GRU, as well as sparse context max-pooling and peak-picking were tested but did not outperform the current approach. See [6-context-and-sequence](./results/6-context-and-sequence/README.md).
+
+#### Self-supervised learning
+The current model struggles to get a solid lock across entire songs, but when it does lock, it does so with very good precision. Fitting beat predictions across a large duration (such as the first and third drop of a song) drops the error to near zero. With the assumption that almost all songs have constant tempo, such a fit can be extrapolated onto the entire song and serve as high quality real training data in a self-supervised learning process. This expands the viable training dataset to virtually all music ever created.  
+One notable finding: Something on the way from DAW to youtube stretches the audio slightly, so assuming that BPM should be a whole number is wrong. Many songs will have be somewhere around ~0.05 BPM off, which would throw alignment off at the ends when rounded.  
+A labeling tool (`python3 -m labeler`) was slopped together to allow iteratively correcting pre-labeled data, all on real music.  

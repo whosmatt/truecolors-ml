@@ -2,3 +2,4 @@ numpy
 soundfile      # libsndfile
 soxr           # resampling to 48 kHz
 pycryptodome  # blowfish for decrypting ableton aifc
+yt-dlp        # dataset.songfetch

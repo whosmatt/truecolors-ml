@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beat Grid Labeler</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<aside id="sidebar">
+  <div class="side-head">
+    <label>Filter
+      <select id="filter">
+        <option value="all">all</option>
+        <option value="unlabelled" selected>unlabelled</option>
+        <option value="needs_review">needs review (unlabelled)</option>
+        <option value="labelled">labelled</option>
+        <optgroup label="human status">
+          <option value="h:confirmed">confirmed</option>
+          <option value="h:variable_tempo">variable tempo</option>
+          <option value="h:non_rhythmic">non-rhythmic</option>
+          <option value="h:skipped">skipped</option>
+        </optgroup>
+        <optgroup label="auto verdict">
+          <option value="a:accept">accept</option>
+          <option value="a:variable_tempo">variable_tempo</option>
+          <option value="a:non_rhythmic">non_rhythmic</option>
+          <option value="a:insufficient_lock">insufficient_lock</option>
+          <option value="a:check_tempo">check_tempo</option>
+          <option value="a:none">not analysed</option>
+        </optgroup>
+      </select>
+    </label>
+    <div class="nav">
+      <button id="prevSong" title="previous song (P)">&#9664; prev</button>
+      <button id="nextSong" title="next song (N)">next &#9654;</button>
+    </div>
+    <div id="listCount" class="muted"></div>
+  </div>
+  <ul id="songList"></ul>
+</aside>
+
+<main>
+  <header id="songHead">
+    <div>
+      <h1 id="songTitle">No song selected</h1>
+      <div id="songSub" class="muted"></div>
+    </div>
+    <div id="loadState" class="muted"></div>
+  </header>
+
+  <section class="transport">
+    <button id="play" class="primary" title="space">&#9654; play</button>
+    <span id="time" class="mono">0:00.000 / 0:00</span>
+    <label class="chk"><input type="checkbox" id="clickOn" checked> click (M)</label>
+    <label>click vol <input type="range" id="clickVol" min="0" max="1" step="0.01" value="0.5"></label>
+    <label>track vol <input type="range" id="trackVol" min="0" max="1" step="0.01" value="0.8"></label>
+    <label>zoom <input type="range" id="zoom" min="0.5" max="20" step="0.1" value="3"> <span id="zoomVal" class="mono">3.0 s</span></label>
+  </section>
+
+  <canvas id="overview" height="110"></canvas>
+  <canvas id="zoomView" height="180"></canvas>
+  <div class="legend muted">
+    <span class="li"><span class="sw sw-ok"></span>solid + agrees</span>
+    <span class="li"><span class="sw sw-bad"></span>solid, disagrees</span>
+    <span class="li"><span class="sw sw-grey"></span>not solid</span>
+    <span class="li"><span class="sw sw-off"></span>excluded</span>
+    <span class="li"><span class="sw sw-grid"></span>grid</span>
+    <span class="li"><span class="sw sw-peak"></span>model peaks</span>
+    <span class="li"><span class="sw sw-kick"></span>kick hits</span>
+    <span class="li"><span class="sw sw-snare"></span>snare hits</span>
+    &nbsp;· click the band strip on top of the overview to toggle include
+  </div>
+
+  <section class="grid-ctl">
+    <div class="row">
+      <span class="lbl">BPM</span>
+      <button data-bpm="-10">&minus;10</button>
+      <button data-bpm="-1">&minus;1</button>
+      <button data-bpm="-0.1">&minus;.1</button>
+      <button data-bpm="-0.01">&minus;.01</button>
+      <input type="number" id="bpm" step="0.01" min="20" max="400">
+      <button data-bpm="0.01">+.01</button>
+      <button data-bpm="0.1">+.1</button>
+      <button data-bpm="1">+1</button>
+      <button data-bpm="10">+10</button>
+      <button data-bpmmul="2">&times;2</button>
+      <button data-bpmmul="0.5">&divide;2</button>
+      <button data-bpmmul="3/2">&times;3/2</button>
+      <button data-bpmmul="2/3">&times;2/3</button>
+      <button data-bpmmul="4/3">&times;4/3</button>
+      <button data-bpmmul="3/4">&times;3/4</button>
+      <button id="resetGrid" title="back to the auto fit / spotify tempo">reset</button>
+    </div>
+    <div class="row">
+      <span class="lbl">Phase</span>
+      <button data-ms="-20">&minus;20</button>
+      <button data-ms="-5">&minus;5</button>
+      <button data-ms="-1">&minus;1</button>
+      <span class="mono small">ms</span>
+      <button data-ms="1">+1</button>
+      <button data-ms="5">+5</button>
+      <button data-ms="20">+20</button>
+      <button id="halfBeat">&frac12; beat</button>
+      <label>t0_s <input type="number" id="t0" step="0.001"></label>
+      <button id="applyOffset" title="shift t0 by the current median offset">apply median offset</button>
+    </div>
+  </section>
+
+  <section class="panels">
+    <div class="panel" id="fitNow">
+      <h2>Current grid</h2>
+      <div class="big">
+        <div><span class="k">err</span><span id="curErr" class="v">–</span></div>
+        <div><span class="k">offset</span><span id="curOff" class="v">–</span></div>
+        <div><span class="k">coverage</span><span id="curCov" class="v">–</span></div>
+        <div><span class="k">beats</span><span id="curBeats" class="v">–</span></div>
+      </div>
+      <div id="hitsNow" class="small mono"></div>
+      <div id="evalMsg" class="muted small"></div>
+    </div>
+    <div class="panel" id="autoPanel">
+      <h2>Auto</h2>
+      <div id="autoVerdict"></div>
+      <div id="tempoHint" class="hint" hidden><span id="tempoHintText"></span> <button id="applyHint">apply hinted bpm</button></div>
+      <ul id="autoReasons" class="small"></ul>
+      <table class="kv small" id="autoFit"></table>
+    </div>
+    <div class="panel" id="refPanel">
+      <h2>Reference</h2>
+      <table class="kv small" id="refTable"></table>
+    </div>
+  </section>
+
+  <section class="verdict">
+    <input type="text" id="note" placeholder="note (optional)">
+    <button id="confirm" class="primary" title="Enter">&#10003; Confirm labelled</button>
+    <button id="rejVar">Reject: variable tempo</button>
+    <button id="rejNon">Reject: non-rhythmic</button>
+    <button id="skip">Skip</button>
+    <label class="chk small"><input type="checkbox" id="recordSkip"> record skip</label>
+    <span id="saved" class="small"></span>
+  </section>
+
+  <section>
+    <table id="sections">
+      <thead>
+        <tr>
+          <th>#</th><th>range</th><th>music</th><th>local bpm</th><th>local err</th>
+          <th>local cov</th><th>solid</th><th>agrees</th>
+          <th>err</th><th>offset</th><th>cov</th><th>include</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div class="small muted">err / offset / cov: against the current grid. Click a row to seek there.</div>
+  </section>
+
+  <footer class="small muted">
+    <b>Keys</b>: space play/pause · M click · ←/→ seek ±5 s · [ ] nudge ∓5 ms (shift: 1 ms) · N/P next/prev song · Enter confirm
+  </footer>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

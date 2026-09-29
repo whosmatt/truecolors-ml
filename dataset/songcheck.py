@@ -8,12 +8,15 @@ the two grids at the song's middle, in ms. Without labels, the auto fits are
 checked against Spotify's tempo instead.
 """
 
+import argparse
 import json
 from collections import Counter
+from pathlib import Path
 
 import numpy as np
 
 from .songgrid import SONGS
+from .songset import split_of
 
 
 def phase_diff_ms(bpm_a, t0_a, bpm_b, t0_b, at_s):
@@ -25,9 +28,16 @@ def phase_diff_ms(bpm_a, t0_a, bpm_b, t0_b, at_s):
 
 
 def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--auto", type=Path, default=SONGS / "auto")
+    ap.add_argument("--splits", nargs="*", default=None,
+                    help="only labelled songs in these songset splits, e.g. test val")
+    args = ap.parse_args()
     index = {r["id"]: r for r in map(json.loads, (SONGS / "index.jsonl").read_text().splitlines())}
-    auto = {p.stem: json.loads(p.read_text()) for p in (SONGS / "auto").glob("*.json")}
+    auto = {p.stem: json.loads(p.read_text()) for p in args.auto.glob("*.json")}
     labels = {p.stem: json.loads(p.read_text()) for p in (SONGS / "labels").glob("*.json")}
+    if args.splits:
+        labels = {k: v for k, v in labels.items() if split_of(k) in args.splits}
     print(f"{len(index)} songs, {sum(r['status'] == 'ok' for r in index.values())} downloaded, "
           f"{len(auto)} analysed, {len(labels)} labelled")
     print("auto verdicts:", dict(Counter(a["verdict"]["auto"] for a in auto.values())))

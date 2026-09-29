@@ -10,9 +10,11 @@ setting is carried as `notch`. The front end itself no longer depends on it:
 v2 removed the comb.
 """
 
+import os
+
 import numpy as np
 
-from frontend.fe import BLOCK_SAMPLES, DTYPE, SPEC_VERSION, Frontend, variant_name
+from frontend.fe import BLOCK_SAMPLES, DTYPE, SAMPLE_RATE, SPEC_VERSION, Frontend, variant_name
 
 # The flattening order below is part of the model contract: it goes into
 # model_meta.json as feature_order and the firmware must fill its input tensor
@@ -45,9 +47,48 @@ def flatten(blocks: np.ndarray) -> np.ndarray:
     return out
 
 
+# TC_MEL=1 appends 40 raw log-mel columns to every build, so one render serves
+# every band count, flux and normalisation variant, derived at load time
+# (train.data). The flux16 view shipped: the device computes it in melflux.c
+# (frontend/mel.py), and frontend.selftest checks the two agree.
+MEL = os.environ.get("TC_MEL") == "1"
+MEL_BANDS, MEL_LO_HZ, MEL_HI_HZ, MEL_WIN = 40, 150.0, 4000.0, 1024
+# Below 150 Hz the FE's kick sub-bands resolve more than 47 Hz FFT bins can; the
+# top is the FE's 4 kHz hi-cut.
+
+
+def _mel_matrix() -> np.ndarray:
+    hz2mel = lambda f: 2595.0 * np.log10(1.0 + f / 700.0)
+    mel2hz = lambda m: 700.0 * (10 ** (m / 2595.0) - 1.0)
+    edges = mel2hz(np.linspace(hz2mel(MEL_LO_HZ), hz2mel(MEL_HI_HZ), MEL_BANDS + 2))
+    f = np.fft.rfftfreq(MEL_WIN, 1.0 / SAMPLE_RATE)
+    W = np.zeros((len(f), MEL_BANDS), np.float32)
+    for b in range(MEL_BANDS):
+        lo, c, hi = edges[b : b + 3]
+        W[:, b] = np.clip(np.minimum((f - lo) / (c - lo), (hi - f) / (hi - c)), 0.0, None)
+    return W
+
+
+def log_mel(pcm16: np.ndarray) -> np.ndarray:
+    """-> (n_blocks, MEL_BANDS) log10 band power; block b's window ends with block b."""
+    n = pcm16.size // BLOCK_SAMPLES
+    x = np.concatenate([np.zeros(MEL_WIN - BLOCK_SAMPLES, np.float32),
+                        pcm16[: n * BLOCK_SAMPLES].astype(np.float32) / 32768.0])
+    frames = np.lib.stride_tricks.sliding_window_view(x, MEL_WIN)[::BLOCK_SAMPLES][:n]
+    win, W = np.hanning(MEL_WIN).astype(np.float32), _mel_matrix()
+    out = np.empty((n, MEL_BANDS), np.float32)
+    for i in range(0, n, 4096):
+        p = np.abs(np.fft.rfft(frames[i : i + 4096] * win, axis=1)) ** 2
+        out[i : i + 4096] = np.log10(p.astype(np.float32) @ W + 1e-10)
+    return out
+
+
 def featurise(pcm16: np.ndarray, comb: bool = False, hicut: bool = True) -> np.ndarray:
     fe = Frontend(comb=comb, hicut=hicut)
-    return flatten(fe.run(pcm16))
+    X = flatten(fe.run(pcm16))
+    if MEL:
+        X = np.concatenate([X, log_mel(pcm16)], axis=1)
+    return X
 
 
 def label_blocks(
@@ -86,4 +127,7 @@ def spec(comb: bool = False, hicut: bool = True) -> dict:
         "feature_order": list(FEATURE_ORDER),
         "block_samples": BLOCK_SAMPLES,
         "notch_hz": list(NOTCH_HZ),
+        **({"mel": {"bands": MEL_BANDS, "lo_hz": MEL_LO_HZ, "hi_hz": MEL_HI_HZ,
+                    "window": MEL_WIN, "columns": "log10 power, after feature_order"}}
+           if MEL else {}),
     }

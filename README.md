@@ -8,6 +8,11 @@ The python implementation in this repo is AI slop, don't expect high code qualit
 The goal is reconstructing the metronome (more accurately: the beat without meter) to a live track, with phase within ~30ms.  
 It is much more satisfying than a traditional (multiband) RMS based effect, but also much more fragile. A slight mismatch is immediately noticeable.
 
+## Beating BeatNet
+
+[BeatNet](https://github.com/mjhydri/BeatNet) is a modern net with the same capability of predicting beats in an audio stream.  
+When ran on my test set, my model outperforms BeatNet on tempo&phase at 1/5th the size and 1/3th the compute, most of which I attribute to clean training data. 
+
 ## Previous approaches
 
 These are approaches I've taken so far, with the last approach being current.
@@ -38,14 +43,44 @@ These attempts test specific approaches and are often reduced (such as music hea
 
 Some inspiration came from [Böck et al. (2012)](https://archives.ismir.net/ismir2012/paper/000049.pdf) "Evaluating the Online Capabilities of Onset Detection Methods", but most of their findings did not translate to my smaller model. 
 
-## Current best approach: multi-head classifier and autocorrelation
+#### Vague model history
+
+- Pure drum classifier & discrete tracking
+  - Trained on drum samples and tested on drumloops
+    - Mediocre performance and poor generalization, even on drumloops
+- Beat prediction (beat + beat_offset)
+  - Trained on synthetic drumloops & discrete tracking
+    - Extremely high phase precision on real drumloops
+    - Poor generalization on real music
+  - Trained on synthetic music, built from midi, drum samples and melody loops
+    - Mediocre generalization, still good phase precision
+- Beat prediction on real music & discrete tracking
+  - Trained on manually labeled real music, bootstrapped by the earlier high phase precision model
+  - Good generalization, good phase precision (although reduced)
+  - Tracking not great, easily thrown off by a breakdown
+  - Significant improvement by using mel, which was previously worse when only relying on drums
+- Two stage beat prediction on real music & discrete tracking
+  - Above model but with another stage added for longer context
+  - Simply raising coarse context did not do much, but adding a second stage to the model to clean up beat activations brought a substantial improvement
+  - Second stage uses up additional compute, but still well within budget
+  - Trained on playlists with sudden track changes for quick recovery
+  - Solid performance, beats BeatNet
+
+## Current best approach: Beat prediction and ML tracking
 
 ### Dataset
 
 Training corpus comes from my full sample library, ground truth from Ableton Live's built-in classifier.  
 After careful filtering, this leaves 7560 kicks, 11274 snares/claps/rims/snaps, 4651 hats, 6806 percussion, 6971 drum loops, and 1123 midi drum loops which can be combined with hits for synthetic fully tagged data.  
-Additionally, 3731 melodic loops and 2144 non-melodic textures.    
-I can't share the dataset due to license restrictions.
+Additionally, 3731 melodic loops and 2144 non-melodic textures.  
+I sampled 100 examples from each category to judge quality and found zero misclassifications.  
+
+For better generalization, a yt-dlp ingestion pipeline is present. I used it to add 293 handpicked tracks with challenging rhythms and a large genre variety. These tracks were manually labeled using the [slop labeling tool](./labeler/), as close to millisecond precision as possible.  
+Due to the relatively small size of this set, multiple tracks from the same artist are kept grouped because of their similarity.
+
+One notable finding: Something on the way from DAW to youtube often stretches the audio slightly, so assuming that BPM should be a whole number is not reliable. Many songs will have be somewhere around ~0.05 BPM off, which would throw alignment off when rounded.  
+
+I can't share the dataset due to license restrictions.  
 
 ### Preprocessing
 
@@ -58,38 +93,41 @@ The entire on-device preprocessing chain is compiled, wrapped into a python modu
 ### Summary
 
 #### Model architecture
-Dense ReLU MLP (528, 128, 64) with four int8 sigmoid heads:
-- beat: presence of a beat in the current block
-- beat_offset: exact beat position within the block
-- hit x4 (kick, snare, hihat, none): presence of the corresponding hit in the current block, used as training aid and for diagnostics
-- music: presence of music for noise rejection
+Two dense ReLU MLPs in series, quantized to int8:
+- Stage A (528, 128, 64) with a single beat head
+- Stage B (528, 64, 32), same input plus beat output from stage A, with four int8 sigmoid heads:
+  - beat: presence of a beat in the current block
+  - beat_offset: exact beat position within the block
+  - hit x4 (kick, snare, hihat, none): presence of the corresponding hit in the current block, used as training aid and for diagnostics
+  - music: presence of music for noise rejection
 
-76k MACs per block, about half of the measured truecolors compute budget.  
-Quantized to int8 tflite: 76k weights, 86kB file
+Each stage starts with a learned linear projection (28 features to 12) that runs once per block. This allows both stages to have 528 inputs despite stage B having extra features.
+
+113k MACs per block, about 3/4 of the measured truecolors compute budget.  
+Quantized to int8 tflite: 84kB + 43kB
 
 Designed for a discrete stage 2 with autocorrelation and phase comb fit. 
 
 #### Input
-- 12 FE features per block at 93.75 blocks/s
-- 2.87s of context as a three-resolution input with raw and averaged raw samples
+- 12 FE features + 16 mel flux bands per block at 93.75 blocks/s
+- 2.87s of context as a three-resolution input with raw and averaged projected samples
   - dense: 16 blocks including 2 blocks lookahead
   - medium: 16 means of 4 blocks
   - coarse: 12 means of 16 blocks
+- Stage B receives stage A beat output, delayed by 3 blocks as quasi-lookahead
 
 #### Results
-Results: [8-deploy-candidate](./results/8-deploy-candidate/README.md)  
-Builds on strategy 5 and 3, reuses the multi-resolution context which brought some of the biggest improvements.
+Results: [9-mel-and-songs](./results/9-mel-and-songs/README.md), [10-two-stage](./results/10-two-stage/README.md)  
+Builds on strategy 8, adds mel flux to the input and a second stage.
 
-This approach uses synthetic loops built from drum hits (where every hit is labelled), as well as beat-labeled drum and tempo-labelled melodic loops. 
-Snares/claps/rims/snaps can be separated into individual classes but there is some overlap between them, especially snares and claps. For this run, they were combined into a single `snare` class, along `kick`, `hat` and `none`.  
-Adding the `none` class brought a mild improvement in hit detection.  
-While the comb filter was dropped (partially because the coil whine was greatly reduced in hardware), removing or changing the lowpass degraded beat prediction performance in all testing so far.  
+In addition to synthetic loops, beat-labeled drum and tempo-labelled melodic loops, this approach uses 293 manually labeled tracks, both as whole songs and snippets with sudden cuts/crossfades.  
+Mel brought a clear improvement at no extra compute, mostly on melodic material.  
+Using a second stage to clean up the beat predictions improved tempo accuracy a lot, with less triplet and octave failures. The attempt to achieve the same via feedback in a single model didn't work.  
+Due to the small music set, performance on real music is measured with 5x cross-validation, grouped by artist:  
+72.7% of 12s windows are usable, compared to the previous 64.9%.  
+Median recovery time on tempo/track changes is 5.3s.  
+While the frontend comb filter was dropped (partially because the coil whine was greatly reduced in hardware), removing or changing the lowpass degraded beat prediction performance in all testing so far.  
 Beat detection performance is rock solid on 4-on-the-floor genres and performs reliably on other common rhythmic patters. It does work on drum breaks to some extent but not as reliably.  
 Music detection is not performing well yet.
 
-Causal TCN, GRU, as well as sparse context max-pooling and peak-picking were tested but did not outperform the current approach. See [6-context-and-sequence](./results/6-context-and-sequence/README.md).
-
-#### Self-supervised learning
-The current model struggles to get a solid lock across entire songs, but when it does lock, it does so with very good precision. Fitting beat predictions across a large duration (such as the first and third drop of a song) drops the error to near zero. With the assumption that almost all songs have constant tempo, such a fit can be extrapolated onto the entire song and serve as high quality real training data in a self-supervised learning process. This expands the viable training dataset to virtually all music ever created.  
-One notable finding: Something on the way from DAW to youtube stretches the audio slightly, so assuming that BPM should be a whole number is wrong. Many songs will have be somewhere around ~0.05 BPM off, which would throw alignment off at the ends when rounded.  
-A labeling tool (`python3 -m labeler`) was slopped together to allow iteratively correcting pre-labeled data, all on real music.  
+Wider models and longer context were retested with real music but did not bring a clear improvement. Causal TCN, GRU, as well as sparse context max-pooling and peak-picking were tested but did not outperform the current approach. See [6-context-and-sequence](./results/6-context-and-sequence/README.md).

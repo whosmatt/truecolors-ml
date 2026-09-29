@@ -42,14 +42,15 @@ def main():
     ap.add_argument("--eval-start", type=int, default=461)
     ap.add_argument("--melodic", default="data/melodic")
     ap.add_argument("--clips", default="data/features3")
+    ap.add_argument("--suffix", default="",
+                    help="test corpora data/<name><suffix>, e.g. _mel for the TC_MEL=1 builds")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
-    sets = {"clips": data.load_many([Path(a.clips)], "test"),
-            "loops": data.load_many([Path("data/loops")], "test")}
-    if Path(a.melodic, "test.npz").exists():
-        sets["melodic"] = data.load_many([Path(a.melodic)], "test")
-    for g in GRID:
-        sets[g] = data.load_many([Path("data") / g], "test")
+    paths = {"clips": a.clips, "loops": "data/loops", "melodic": a.melodic,
+             **{g: f"data/{g}" for g in GRID}}
+    paths = {k: Path(v + a.suffix) for k, v in paths.items()}
+    sets = {k: data.load_many([p], "test", mel="raw") for k, p in paths.items()
+            if (p / "test.npz").exists()}
 
     res = json.load(open(a.out)) if a.out and Path(a.out).exists() else {}
     for run in a.runs:
@@ -60,10 +61,11 @@ def main():
         is_seq = info.get("approach") == "6-sequence"
         row = {"macs": info.get("macs")}
         for name, s in sets.items():
+            s = data.for_run(s, paths[name], "test", info)
             if is_seq:
                 act = seq.activation(m, s, nz["mean"], nz["scale"])
             else:
-                act = scoreboard.activation(m, s, nz["mean"], nz["scale"], scoreboard.run_spec(r))[0]
+                act = scoreboard.run_activation(r, m, s, nz["mean"], nz["scale"], info)
             act = np.where(pos_in_take(s) >= a.eval_start, act, 0.0).astype(np.float32)
             row[name] = (gridmetrics.per_take(act, s) if name in ("clips",) + GRID
                          else tempo_score(act, s))

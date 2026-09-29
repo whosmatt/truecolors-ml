@@ -44,6 +44,18 @@ def activation(model, split, mean, scale, spec, key="beat") -> np.ndarray:
     return a, out, c
 
 
+def run_activation(run: Path, model, split, mean, scale, info: dict) -> np.ndarray:
+    """Beat activation. A run with a fb3_* column is a two-stage model fed the
+    stored output of its model A; TC_CLOSED_LOOP=1 feeds it its own instead
+    (the self-feedback runs e1/e2 of 2026-09-28)."""
+    import os
+    if (any(t.startswith("fb3_") for t in info.get("cascade") or ())
+            and os.environ.get("TC_CLOSED_LOOP") == "1"):
+        from . import closedloop
+        return closedloop.activation(run, split)
+    return activation(model, split, mean, scale, run_spec(run))[0]
+
+
 def run_spec(run: Path) -> mres.Spec:
     try:
         return mres.Spec(**json.loads((run / "result.json").read_text())["spec"])

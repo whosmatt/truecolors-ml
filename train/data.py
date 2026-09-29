@@ -41,9 +41,59 @@ class Split:
         return len(self.centres)
 
 
-def load(path: Path, split: str, past: int = PAST, future: int = FUTURE) -> Split:
+N_FE = 12  # front-end columns; mel builds append raw log-mel after them
+
+
+def mel_view(X: np.ndarray, take: np.ndarray, mode: str | None) -> np.ndarray:
+    """Columns a model sees, from a stored X that may carry raw log-mel.
+
+    None: the front end only. "raw": everything stored. "fluxN": the front end
+    plus positive log-mel flux in N bands (adjacent stored bands merged by power).
+    """
+    if mode == "raw":
+        return X
+    if mode is None:
+        return X[:, :N_FE]
+    if not mode.startswith("flux"):
+        raise ValueError(f"unknown mel mode {mode!r}")
+    if X.shape[1] <= N_FE:
+        raise ValueError("mel mode on a corpus built without TC_MEL=1")
+    lm = X[:, N_FE:]
+    groups = np.array_split(np.arange(lm.shape[1]), int(mode[4:]))
+    bands = np.stack([np.log10(np.mean(10.0 ** lm[:, g], axis=1)) for g in groups], axis=1)
+    flux = np.zeros_like(bands)
+    flux[1:] = np.maximum(bands[1:] - bands[:-1], 0.0)
+    flux[np.r_[True, take[1:] != take[:-1]]] = 0.0  # no flux across a take boundary
+    return np.concatenate([X[:, :N_FE], flux], axis=1).astype(np.float32)
+
+
+def with_aux(X: np.ndarray, path, split: str, aux) -> np.ndarray:
+    """Append train.cascade columns (aux_<tag>_<split>.npy) after the features."""
+    if not aux:
+        return X
+    cols = [np.load(Path(path) / f"aux_{t}_{split}.npy") for t in aux]
+    return np.concatenate([X] + cols, axis=1).astype(np.float32)
+
+
+def for_run(s: "Split", path, split: str, info: dict) -> "Split":
+    """A split loaded with mel="raw" and no aux, as the run in result.json `info` sees it."""
+    from dataclasses import replace
+    X = with_aux(mel_view(s.X, s.take, info.get("mel")), path, split, info.get("cascade") or ())
+    return replace(s, X=X)
+
+
+def view(s: "Split", mode: str | None) -> "Split":
+    """A copy of a split loaded with mel="raw", as a model with `mode` sees it."""
+    from dataclasses import replace
+    return replace(s, X=mel_view(s.X, s.take, mode))
+
+
+def load(path: Path, split: str, past: int = PAST, future: int = FUTURE,
+         mel: str | None = None, aux=()) -> Split:
     d = np.load(Path(path) / f"{split}.npz")
     X, y, off, take = d["X"], d["y"], d["off"], d["take"]
+    X = mel_view(X, take, mel)
+    X = with_aux(X, path, split, aux)
     # A centre is valid when the whole window shares its take id.
     n = len(X)
     idx = np.arange(n)
@@ -146,7 +196,7 @@ def period_from_beats(s: Split) -> np.ndarray:
 
 
 def load_many(dirs, split: str, past: int = PAST, future: int = FUTURE,
-              fill=None) -> Split:
+              fill=None, mel: str | None = None, aux=()) -> Split:
     """Merge corpora, keeping take ids unique.
 
     Corpora without a period column get one derived from their beat labels;
@@ -155,7 +205,7 @@ def load_many(dirs, split: str, past: int = PAST, future: int = FUTURE,
     """
     parts, base = [], 0
     for d, f in zip(dirs, fill or [{}] * len(dirs)):
-        s = load(Path(d), split, past, future)
+        s = load(Path(d), split, past, future, mel=mel, aux=aux)
         # Constant labels a corpus lacks but implies, e.g. every loop is music.
         for k, v in f.items():
             if getattr(s, k) is None:

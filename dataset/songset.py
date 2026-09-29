@@ -77,7 +77,16 @@ def main():
     ap.add_argument("--out", type=Path, default=Path("data/songs"))
     ap.add_argument("--auto", action="store_true")
     ap.add_argument("--repeats", type=int, default=1, help="renders per song, cycling whine and level")
+    ap.add_argument("--fold", type=int, default=None,
+                    help="cross-validation fold as test (dataset.songfolds) instead of the hash split")
     a = ap.parse_args()
+    splitter = split_of
+    if a.fold is not None:
+        from . import songfolds
+        folds = songfolds.load()
+        splitter = lambda k: songfolds.split_for(k, a.fold, folds)
+        (a.out / "folds.json").parent.mkdir(parents=True, exist_ok=True)
+        (a.out / "folds.json").write_text(json.dumps(folds))
     a.out.mkdir(parents=True, exist_ok=True)
     index = {r["id"]: r for r in map(json.loads, (SONGS / "index.jsonl").read_text().splitlines())}
     pool = labels(a.auto)
@@ -108,7 +117,7 @@ def main():
                     if sec["solid"]:
                         locked[int(sec["start_s"] / (BLOCK_SAMPLES / SAMPLE_RATE)):
                                int(sec["end_s"] / (BLOCK_SAMPLES / SAMPLE_RATE))] = 1.0
-            d = acc[split_of(lab["id"])]
+            d = acc[splitter(lab["id"])]
             d["X"].append(X[skip:])
             d["y"].append(np.full((L - skip, 4), MASK, np.float32))
             d["off"].append(np.full((L - skip, 3), MASK, np.float32))
@@ -126,7 +135,7 @@ def main():
     meta = {"built": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "source": "songs, " + ("auto-accepted grids, unchecked" if a.auto
                                    else "hand-checked constant-tempo grids"),
-            "masked": ["y", "off"], "takes": n, "repeats": a.repeats,
+            "masked": ["y", "off"], "takes": n, "repeats": a.repeats, "fold": a.fold,
             **features.spec(hicut=True)}
     for s, _ in gridset.SPLITS:
         d = acc[s]

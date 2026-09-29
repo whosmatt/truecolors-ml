@@ -17,24 +17,38 @@ import tensorflow as tf
 from . import mres
 
 
+HALF_ABOVE_BYTES = 256 << 20  # TF gets 5.43 GB of the 8 GB card under WSL
+
+
 class Corpus:
     """One split on the GPU: normalised frames, pools, per-head targets."""
 
     def __init__(self, split, mean, scale, spec: mres.Spec, targets):
         Xn = ((split.X - mean) / scale).astype(np.float32)
         views = spec.views()
-        pools = [mres.pooled(Xn, st, k) for k, st, _ in views]
+        # Mel and cascade corpora outgrow 8 GB of VRAM at float32 (20M blocks x 28
+        # columns x 3 pools = 6.7 GB); those live as float16 and are cast per batch.
+        # Small corpora stay float32; every B/C run of 2026-09-28 is float16. Each pool is
+        # converted as it is made, so host memory never holds all of them at float32.
+        self.half = Xn.nbytes * len(views) > HALF_ABOVE_BYTES
+        pools = []
+        for k, st, _ in views:
+            p = mres.pooled(Xn, st, k)
+            pools.append(p.astype(np.float16) if self.half else p)
+            del p
         offs = [o for _, _, o in views]
         # Offsets are gathered from one stacked array, so a window is a single
         # gather: row = pool_index * N + centre + offset.
         n = len(Xn)
         self.n = n
         self.frames = tf.constant(np.concatenate(pools))
+        del pools
         self.offsets = tf.constant(np.concatenate(
             [k * n + o for k, o in enumerate(offs)]).astype(np.int64))
         self.width = spec.width(Xn.shape[1])
         self.order = mres.valid_centres(split.take, spec)
-        self.y = {k: tf.constant(v) for k, v in self._targets(split, targets).items()}
+        dt = np.float16 if self.half else np.float32  # labels are -1/0/1 and offsets in [0, 1)
+        self.y = {k: tf.constant(v.astype(dt)) for k, v in self._targets(split, targets).items()}
 
     @staticmethod
     def _targets(s, targets):
@@ -54,8 +68,10 @@ class Corpus:
 
     def fetch(self, c):
         rows = tf.gather(self.frames, c[:, None] + self.offsets[None, :])
+        if self.half:
+            rows = tf.cast(rows, tf.float32)
         return (tf.reshape(rows, (-1, self.width)),
-                {k: tf.gather(v, c) for k, v in self.y.items()})
+                {k: tf.cast(tf.gather(v, c), tf.float32) for k, v in self.y.items()})
 
 
 class Trainer(keras.Model):

@@ -20,6 +20,8 @@ from . import gpu  # noqa: F401  must precede keras
 import keras
 import numpy as np
 
+from dataset import features
+
 from . import data, fast, mres
 from . import model as model_mod
 
@@ -29,17 +31,27 @@ SILENT_BLOCKS = 64   # and 0% of real loops sit below this (val, 2026-09-23)
 
 
 def silent(s) -> np.ndarray:
-    """Mean spl_db over the past 683 ms, per block, below SILENT_DB."""
-    spl = s.X[:, -1].astype(np.float64)
+    """Mean spl_db over the past 683 ms, per block, below SILENT_DB.
+
+    By name, not position: mel and cascade columns come after the front end, and
+    taking the last column made every mel run's music labels 0 (fixed 2026-09-29)."""
+    spl = s.X[:, features.FEATURE_ORDER.index("spl_db")].astype(np.float64)
     c = np.r_[0.0, np.cumsum(spl)]
     r = np.full(len(spl), np.inf)
     r[SILENT_BLOCKS:] = (c[SILENT_BLOCKS + 1:] - c[1:-SILENT_BLOCKS]) / SILENT_BLOCKS
     return r < SILENT_DB
 
 
-def build(n_input, hidden, heads: dict, dropout=0.1) -> keras.Model:
+def build(n_input, hidden, heads: dict, dropout=0.1, proj=None, n_feat=None) -> keras.Model:
     inp = keras.Input(shape=(n_input,), name="features")
     x = inp
+    if proj:
+        # One linear map per frame, shared across frames. Pooling is a mean, so
+        # the device can apply it once per block before the ring and pool the
+        # projected values: n_feat*proj MACs per block, not per inference.
+        x = keras.layers.Reshape((n_input // n_feat, n_feat), name="frames")(x)
+        x = keras.layers.Dense(proj, name="proj")(x)
+        x = keras.layers.Flatten(name="projected")(x)
     for i, h in enumerate(hidden):
         x = keras.layers.Dense(h, activation="relu", name=f"dense{i}")(x)
         if dropout:
@@ -56,6 +68,9 @@ def main():
     ap.add_argument("--noise", type=Path, default=Path("data/noise"))
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--epochs", type=int, default=25)
+    ap.add_argument("--fixed-epochs", action="store_true",
+                    help="train exactly --epochs, no early stopping: for a final model on all songs, "
+                         "with the epoch count taken from cross-validation")
     ap.add_argument("--batch", type=int, default=2048)
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--hidden", type=int, nargs="+", default=[128, 64])
@@ -87,6 +102,12 @@ def main():
     ap.add_argument("--mil-weight", type=float, default=1.0)
     ap.add_argument("--mil-segments", type=int, default=8, help="segments per step")
     ap.add_argument("--mil-len", type=int, default=512, help="centres per segment")
+    ap.add_argument("--mel", default=None,
+                    help="mel view of a TC_MEL=1 corpus, e.g. flux16 (see data.mel_view)")
+    ap.add_argument("--proj", type=int, default=None,
+                    help="per-frame linear projection to this many values before the trunk")
+    ap.add_argument("--aux", action="append", default=[],
+                    help="train.cascade columns, e.g. act_n_song_s0 or st_n_song_s0")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps-per-execution", type=int, default=32)
     a = ap.parse_args()
@@ -105,8 +126,8 @@ def main():
     if a.music_loops:
         dirs.append(a.loops)
         fill.append({"music": 1.0})
-    tr = data.load_many(dirs, "train", fill=fill)
-    va = data.load_many(dirs, "val", fill=fill)
+    tr = data.load_many(dirs, "train", fill=fill, mel=a.mel, aux=a.aux)
+    va = data.load_many(dirs, "val", fill=fill, mel=a.mel, aux=a.aux)
     if a.music_silence:
         for s_ in (tr, va):
             s_.music[silent(s_) & (s_.music[:, 0] >= 0)] = 0.0
@@ -145,14 +166,18 @@ def main():
         losses["music"] = model_mod.masked_bce(a.music_pos)
         weights["music"] = 1.0
 
-    m = build(spec.width(len(meta["feature_order"])), tuple(a.hidden), heads)
+    n_feat = tr.X.shape[1]
+    if a.proj:
+        assert a.mid_pool == a.coarse_pool == "mean", "projection needs mean pools"
+    m = build(spec.width(n_feat), tuple(a.hidden), heads, proj=a.proj, n_feat=n_feat)
     print(f"heads {list(heads)} | train {len(tr.X):,} blocks | MACs {model_mod.macs(m):,}")
 
     t0 = time.time()
     trc, vac = (fast.Corpus(s_, mean, scale, spec, targets) for s_ in (tr, va))
     if a.melodic:
         from . import seq
-        seg = fast.Segments(data.load(a.melodic, "train"), mean, scale, spec, a.mil_len)
+        seg = fast.Segments(data.load(a.melodic, "train", mel=a.mel, aux=a.aux), mean, scale, spec,
+                            a.mil_len)
         trainer = fast.MilTrainer(m, trc, vac, a.batch, seg, a.mil_segments,
                                   seq.mil_bce(a.pos_weight), a.mil_weight, seed=a.seed)
     else:
@@ -164,8 +189,9 @@ def main():
         trainer.train_data(), validation_data=trainer.val_data(),
         epochs=a.epochs, verbose=2,
         callbacks=[fast.Reshuffle(),
-                   keras.callbacks.EarlyStopping(monitor="val_loss", patience=3,
-                                                 restore_best_weights=True),
+                   *([] if a.fixed_epochs else
+                     [keras.callbacks.EarlyStopping(monitor="val_loss", patience=3,
+                                                    restore_best_weights=True)]),
                    keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.3,
                                                      patience=2)],
     )
@@ -178,7 +204,9 @@ def main():
         "phrase": a.phrase, "music": a.music, "music_loops": a.music_loops,
         "music_silence": a.music_silence, "music_pos": a.music_pos,
         "melodic": str(a.melodic) if a.melodic else None,
-        "extra": [str(d) for d in a.extra],
+        "extra": [str(d) for d in a.extra], "clips": str(a.clips), "noise": str(a.noise),
+        "mel": a.mel, "proj": a.proj, "n_feat": n_feat, "cascade": a.aux, "gpu_float16": bool(trc.half),
+        "fixed_epochs": a.epochs if a.fixed_epochs else None,
         "mil": [a.mil_weight, a.mil_segments, a.mil_len] if a.melodic else None,
         "train_blocks": int(len(tr.X)), "minutes": (time.time() - t0) / 60,
         "fe_variant": meta.get("fe_variant"),

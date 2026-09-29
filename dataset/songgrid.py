@@ -58,7 +58,11 @@ def device_features(m: np.ndarray, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
     wet = augment.apply_ir(m)
     y = augment.finish(wet, 240, rng, dbfs=float(np.mean(render.LEVEL_DBFS)))
-    return features.featurise((y * 32767.0).astype(np.int16), hicut=True)
+    pcm = (y * 32767.0).astype(np.int16)
+    X = features.featurise(pcm, hicut=True)
+    if not features.MEL:  # mel models need the columns; others ignore them
+        X = np.concatenate([X, features.log_mel(pcm)], axis=1)
+    return X
 
 
 class Model:
@@ -73,6 +77,9 @@ class Model:
         nz = np.load(run / "norm.npz")
         self.mean, self.scale = nz["mean"], nz["scale"]
         self.spec = scoreboard.run_spec(run)
+        info = json.loads((run / "result.json").read_text())
+        self.mel = info.get("mel")
+        assert not info.get("cascade"), "cascade models need model A run alongside"
 
     def __call__(self, X: np.ndarray):
         """-> per block (beat, beat_offset, music, hit (n, 4)); zero before the lookback fills."""
@@ -80,7 +87,7 @@ class Model:
 
         n = len(X)
         z = np.zeros((n, 1), dtype=np.float32)
-        s = data.Split(X, z, z, np.zeros(n, dtype=np.int32), np.arange(n))
+        s = data.view(data.Split(X, z, z, np.zeros(n, dtype=np.int32), np.arange(n)), self.mel)
         a, out, c = scoreboard.activation(self.m, s, self.mean, self.scale, self.spec)
         off, mus = np.zeros(n, np.float32), np.zeros(n, np.float32)
         hit = np.zeros((n, 4), np.float32)
@@ -370,14 +377,16 @@ def main():
     ap.add_argument("--ids", nargs="*", default=None)
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--run", type=Path, default=MODEL)
+    ap.add_argument("--out-dir", type=Path, default=SONGS / "auto",
+                    help="the labeller reads songs/auto; write other models elsewhere")
     a = ap.parse_args()
     index = [json.loads(l) for l in (SONGS / "index.jsonl").read_text().splitlines() if l.strip()]
     todo = [r for r in index if r.get("status") == "ok" and (a.ids is None or r["id"] in a.ids)]
     model = Model(a.run)
-    (SONGS / "auto").mkdir(parents=True, exist_ok=True)
+    a.out_dir.mkdir(parents=True, exist_ok=True)
     t_start = time.time()
     for n, row in enumerate(todo):
-        dst = SONGS / "auto" / f"{row['id']}.json"
+        dst = a.out_dir / f"{row['id']}.json"
         if dst.exists() and not a.force:
             continue
         t = time.time()

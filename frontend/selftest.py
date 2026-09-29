@@ -19,6 +19,28 @@ def run_sine(freq, blocks, hicut=True):
     return Frontend(hicut=hicut).run(sine(freq, blocks))[-1]
 
 
+def check_mel():
+    """melflux.c against the numpy prototype the corpora were built with."""
+    from dataset import features
+    from train.data import mel_view
+
+    from .mel import MelFlux
+    rng = np.random.default_rng(0)
+    x = np.concatenate([sine(220.0, 40), (rng.standard_normal(40 * BLOCK_SAMPLES) * 8000).astype("<i2"),
+                        sine(3000.0, 40)]).astype(np.float64)
+    # A mic-like floor (-60 dBFS). Without it, bands ~110 dB under a full-scale tone sit
+    # at float32 FFT rounding in the C code (float64 in numpy): 4.5e-3 apart, 1.2e-5 on
+    # real audio (2026-09-29).
+    x = np.clip(x + rng.standard_normal(len(x)) * 33.0, -32768, 32767).astype("<i2")
+    c = MelFlux().run(x)
+    n = len(c)
+    ref = mel_view(np.concatenate([np.zeros((n, 12), np.float32), features.log_mel(x)], axis=1),
+                   np.zeros(n, np.int32), "flux16")[:, 12:]
+    err = float(np.abs(c - ref).max())
+    assert err < 1e-3, err
+    return err
+
+
 def main():
     assert Frontend().variant == VARIANT_HICUT, Frontend().variant
     assert Frontend(hicut=False).variant == 0
@@ -45,6 +67,7 @@ def main():
           f"{BLOCK_SAMPLES} samples/block  {BLOCK_HZ:.3f} blocks/s")
     print(f"hi-cut 6 kHz {s['rms']:.2e} vs 1 kHz {p['rms']:.2e} | "
           f"open 6 kHz {open_['rms']:.2e}")
+    print(f"melflux.c vs numpy flux16: max {check_mel():.2e}")
     print("OK")
 
 

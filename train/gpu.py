@@ -71,9 +71,17 @@ def limit_memory() -> None:
         import tensorflow as tf
     except ImportError:
         return
+    import os
+    cap = os.environ.get("TC_GPU_MB")
     for dev in tf.config.list_physical_devices("GPU"):
         try:
-            tf.config.experimental.set_memory_growth(dev, True)
+            if cap:
+                # Growth mode stops at 5.43 GB under WSL; a fixed cap reaches ~6.5 of 8 GB
+                # (measured 2026-09-28). A capped trainer leaves no room for anything else.
+                tf.config.set_logical_device_configuration(
+                    dev, [tf.config.LogicalDeviceConfiguration(memory_limit=int(cap))])
+            else:
+                tf.config.experimental.set_memory_growth(dev, True)
         except RuntimeError:
             pass  # already initialised; nothing to do
 

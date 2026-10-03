@@ -33,7 +33,7 @@ def main():
             continue
         m = decode(SONGS / index[k]["audio"])
         rng = np.random.default_rng(int.from_bytes(k.encode()[:4], "big"))
-        y = augment.finish(augment.apply_ir(m), 240, rng, dbfs=float(np.mean(render.LEVEL_DBFS)))
+        y = augment.finish(augment.apply_ir(m, rng), 240, rng, dbfs=float(np.mean(render.LEVEL_DBFS)))
         np.save(dst, soxr.resample(y, SAMPLE_RATE, a.rate, quality="HQ").astype(np.float16))
         print(k, flush=True)
 

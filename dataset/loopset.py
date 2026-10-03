@@ -78,7 +78,7 @@ def main():
     for i, row in enumerate(pool):
         for rep in range(a.repeats):
             rng = np.random.default_rng(row["file_id"] + 7919 * rep)
-            notch = features.NOTCH_HZ[(i + rep) % len(features.NOTCH_HZ)]
+            notch = features.NOTCH_CYCLE[(i + rep) % len(features.NOTCH_CYCLE)]
             r = gridset.take(row, rng, notch, hicut=not a.no_hicut)
             if r is None:
                 continue

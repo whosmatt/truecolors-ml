@@ -37,6 +37,8 @@ def _build(root: Path, defines: tuple[str, ...] = ()) -> Path:
     # still rebuild.
     src = [root / "components/audio/frontend.c", _HERE / "shim.c", inc / "frontend.h"]
     tag = "".join("_" + d.lower().replace("fe_no_", "no") for d in sorted(defines))
+    if root.resolve() != truecolors_root():  # e.g. an older version from history
+        tag += "_" + root.name
     out = _HERE / "build" / f"libfe{tag}.so"
     out.parent.mkdir(exist_ok=True)
     if not out.exists() or out.stat().st_mtime < max(s.stat().st_mtime for s in src):

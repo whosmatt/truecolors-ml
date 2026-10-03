@@ -150,8 +150,8 @@ def main():
         info[split] = []
         for p in range(count):
             y, beats, masked, gaps, meta = build_one(songs, rng, index)
-            notch = features.NOTCH_HZ[p % len(features.NOTCH_HZ)]
-            y = augment.finish(augment.apply_ir(y), notch, rng, dbfs=float(rng.uniform(*render.LEVEL_DBFS)))
+            notch = features.NOTCH_CYCLE[p % len(features.NOTCH_CYCLE)]
+            y = augment.finish(augment.apply_ir(y, rng), notch, rng, dbfs=float(rng.uniform(*render.LEVEL_DBFS)))
             X = features.featurise((y * 32767.0).astype(np.int16), hicut=True)
             L = len(X)
             beat, frac, period, music = block_labels(L, beats, masked, gaps, meta["segments"])

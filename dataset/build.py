@@ -44,7 +44,6 @@ def main():
     ap.add_argument("--no-backing", action="store_true")
     ap.add_argument("--no-augment", action="store_true",
                     help="skip the IR and whine; dry renders only")
-    ap.add_argument("--ir", type=Path, default=augment.IR_PATH)
     ap.add_argument("--no-hicut", action="store_true", help="build without the 4 kHz hi-cut")
     ap.add_argument("--db", type=Path, default=None,
                     help="Live index to read clips from; a saved copy pins the clip set, "
@@ -58,8 +57,7 @@ def main():
     pools = render.pools_from_manifest(a.manifest)
     beds = {} if a.no_backing else render.backing_pool(a.manifest)
     if not a.no_augment:
-        augment.IR_PATH = a.ir
-        print(f"augmenting with {a.ir} + measured coil whine per PWM setting")
+        print(f"augmenting with {augment.n_kernels()} room+mic kernels ({augment.KERNELS}) + self-noise per PWM setting")
     print("one-shot pools:", {k: len(v) for k, v in sorted(pools.items())})
     print("backing tempos:", len(beds))
 
@@ -100,7 +98,7 @@ def main():
             r = render.render(clip, kit, classes=DETECTION_CLASSES, backing=bed,
                               min_seconds=a.seconds)
             # Convolution is linear and notch-independent: once per render.
-            wet = None if a.no_augment else augment.apply_ir(r.audio)
+            wet = None if a.no_augment else augment.apply_ir(r.audio, rng)
             for notch in features.NOTCH_HZ:
                 dbfs = float(rng.uniform(*render.LEVEL_DBFS))
                 if a.no_augment:
@@ -175,9 +173,9 @@ def main():
         "level_dbfs": list(render.LEVEL_DBFS),
         "augmented": not a.no_augment,
         "laser_off": a.laser_off,
-        "ir": None if a.no_augment else str(a.ir),
-        "ir_sha256": None if a.no_augment or not a.ir.exists()
-                     else hashlib.sha256(a.ir.read_bytes()).hexdigest(),
+        "ir": None if a.no_augment else str(augment.KERNELS),
+        "ir_sha256": None if a.no_augment else hashlib.sha256(augment.KERNELS.read_bytes()).hexdigest(),
+        "self_noise": None if a.no_augment else str(augment.SELF_NOISE),
         **features.spec(hicut=not a.no_hicut),
     }
     for s, _ in SPLITS:

@@ -96,10 +96,10 @@ def main():
     n, t_start = 0, time.time()
     for i, lab in enumerate(pool):
         m = decode(SONGS / index[lab["id"]]["audio"])
-        wet = augment.apply_ir(m)
+        wet = augment.apply_ir(m, np.random.default_rng(int.from_bytes(lab["id"].encode()[:4], "big") + 104729))
         for rep in range(a.repeats):
             rng = np.random.default_rng(int.from_bytes(lab["id"].encode()[:4], "big") + 7919 * rep)
-            notch = features.NOTCH_HZ[(i + rep) % len(features.NOTCH_HZ)]
+            notch = features.NOTCH_CYCLE[(i + rep) % len(features.NOTCH_CYCLE)]
             y = augment.finish(wet, notch, rng, dbfs=float(rng.uniform(*render.LEVEL_DBFS)))
             X = features.featurise((y * 32767.0).astype(np.int16), hicut=True)
             L = len(X)

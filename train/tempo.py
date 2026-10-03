@@ -184,7 +184,7 @@ def take_from_loop(row: dict, rng: np.random.Generator, notch_hz: int):
     # from the loop start; rolling by `off` moves the grid by -off.
     phase_ms = ((-off) % beat_samples) / SAMPLE_RATE * 1000.0
 
-    wet = augment.apply_ir(tiled)
+    wet = augment.apply_ir(tiled, rng)
     dbfs = float(rng.uniform(-30.0, -8.0))
     y = augment.finish(wet, notch_hz, rng, dbfs=dbfs)
     return (y * 32767.0).astype(np.int16), phase_ms

@@ -31,6 +31,7 @@ FEATURE_ORDER = (
 )
 N_FEATURES = len(FEATURE_ORDER)
 NOTCH_HZ = (120, 240, 480)  # PWM settings with a measured whine capture
+NOTCH_CYCLE = (120, 120, 240, 480)  # per-take draw: 120 Hz is the default and most use
 
 
 def flatten(blocks: np.ndarray) -> np.ndarray:

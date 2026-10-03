@@ -38,6 +38,42 @@ NON_MUSIC_TAGS = (
     "Sounds|Ambience & FX|Sound FX",
 )
 SILENT_FRACTION = 0.15  # takes that are only room tone and coil whine
+# Real device captures (miccap, 2026-10-03): typing and room activity, fridge,
+# laser-off baselines, coil whine sweeps with the fan. Raw samples, exactly what
+# the device sees. Each capture's last 10 s is held out as one contiguous val
+# take, so neighbouring windows never straddle the split.
+DEVICE_CAPTURES = (
+    "data/ambient/2026-10-03/ambient_*.raw",
+    "data/whine/2026-10-03/quiet_*.raw",
+    "data/whine/2026-10-03/sweep*.raw",
+    "data/whine/2026-10-03/rainbow*.raw",
+    "data/ir/2026-10-03/dev_quiet.raw",
+)
+DEVICE_VAL_S = 10.0
+# Train repeats: ~2% of the noise blocks as recorded. Room activity also comes
+# louder or closer; self-noise (baselines, whine) only at its real level.
+DEVICE_TRAIN_GAINS_DB = {"ambient": (0.0, 6.0, 12.0)}
+DEVICE_TRAIN_REPEATS = 3
+
+
+def device_takes():
+    """-> [(name, split, notch, int16 samples)] from the raw device captures."""
+    import glob
+    out = []
+    for pat in DEVICE_CAPTURES:
+        for path in sorted(glob.glob(pat)):
+            x = np.fromfile(path, dtype="<i2")
+            name = Path(path).stem
+            hz = next((h for h in features.NOTCH_HZ if name.startswith(("sweep%d" % h, "rainbow%d" % h))), 0)
+            cut = len(x) - int(DEVICE_VAL_S * SAMPLE_RATE)
+            gains = DEVICE_TRAIN_GAINS_DB.get(name.split("_")[0], (0.0,) * DEVICE_TRAIN_REPEATS)
+            for g in gains:
+                tr = x[:cut]
+                if g:
+                    tr = np.clip(np.round(tr.astype(np.float64) * 10 ** (g / 20)), -32768, 32767).astype("<i2")
+                out.append((f"{name}{'+%gdB' % g if g else ''}", "train", hz, tr))
+            out.append((name, "val", hz, x[cut - int(SETTLE_S * SAMPLE_RATE):]))
+    return out
 
 
 def pool(lib: Library, manifest: str) -> list[dict]:
@@ -85,7 +121,7 @@ def take(row: dict | None, rng: np.random.Generator, notch: int):
         if m.size < SAMPLE_RATE:
             return None
         tiled = np.resize(np.roll(m, -int(rng.integers(m.size))), need)
-        wet = augment.apply_ir(tiled)
+        wet = augment.apply_ir(tiled, rng)
     dbfs = float(rng.uniform(*render.LEVEL_DBFS))
     y = augment.finish(wet, notch, rng, dbfs=dbfs)
     return features.featurise((y * 32767.0).astype(np.int16), hicut=True)
@@ -112,7 +148,7 @@ def main():
     for i, row in enumerate(items):
         seed = (row["file_id"] if row else 10**9 + i)
         rng = np.random.default_rng(seed)
-        notch = features.NOTCH_HZ[i % len(features.NOTCH_HZ)]
+        notch = features.NOTCH_CYCLE[i % len(features.NOTCH_CYCLE)]
         X = take(row, rng, notch)
         if X is None or len(X) <= skip + 300:
             continue
@@ -132,8 +168,26 @@ def main():
         if (i + 1) % 500 == 0:
             print(f"  {i+1}/{len(items)}  {n} takes  {time.time()-t0:.0f}s", flush=True)
 
+    dev = []
+    for name, split, hz, x in device_takes():
+        X = features.featurise(x, hicut=True)[skip:]
+        m = len(X)
+        d = acc[split]
+        d["X"].append(X)
+        for k, w in (("y", 4), ("off", 3), ("beat", 1), ("beat_off", 1),
+                     ("downbeat", 1), ("downbeat_off", 1), ("phrase", 1),
+                     ("period", 1)):
+            d[k].append(np.full((m, w), MASK, dtype=np.float32))
+        d["music"].append(np.zeros((m, 1), dtype=np.float32))
+        d["take"].append(np.full(m, n, dtype=np.int32))
+        d["notch"].append(np.full(m, hz, dtype=np.int16))
+        dev.append(f"{name}:{split}")
+        n += 1
+    print(f"  device captures: {len(dev)} takes", flush=True)
+
     meta = {"built": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "source": "non-music: speech, foley, atmosphere, sound fx, plus silence",
+            "source": "non-music: speech, foley, atmosphere, sound fx, plus silence, plus raw device captures",
+            "device_captures": dev,
             "tags": list(NON_MUSIC_TAGS), "silent_fraction": SILENT_FRACTION,
             "takes": n, **features.spec(hicut=True)}
     for s, _ in gridset.SPLITS:

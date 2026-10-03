@@ -71,7 +71,7 @@ def main():
         rng = np.random.default_rng(fid)
         r = render.render(clip, kit, classes=DETECTION_CLASSES, backing=bed,
                           min_seconds=render.AGC_SETTLE_S + render.KEEP_S)
-        wet = augment.apply_ir(r.audio)
+        wet = augment.apply_ir(r.audio, rng)
         dbfs = float(rng.uniform(*render.LEVEL_DBFS))
         y = augment.finish(wet, a.notch, rng, dbfs=dbfs)
         X = features.featurise((y * 32767.0).astype(np.int16))

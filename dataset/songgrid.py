@@ -56,7 +56,7 @@ def device_features(m: np.ndarray, seed: int) -> np.ndarray:
     from . import augment, features, render
 
     rng = np.random.default_rng(seed)
-    wet = augment.apply_ir(m)
+    wet = augment.apply_ir(m, rng)
     y = augment.finish(wet, 240, rng, dbfs=float(np.mean(render.LEVEL_DBFS)))
     pcm = (y * 32767.0).astype(np.int16)
     X = features.featurise(pcm, hicut=True)

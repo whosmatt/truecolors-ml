@@ -13,9 +13,9 @@ import numpy as np
 
 from . import data, export2, grid5, seq
 
-GROUPS = [("real loops", "data/loops_grid_mel", 1), ("melodic", "data/melodic_mel", 1),
-          ("rendered", "data/features4_mel", 1), ("songs", "data/songs_all_mel", 1),
-          ("non-music", "data/noise_mel", 0), ("silence", "data/noise_mel", -1)]
+GROUPS = [("real loops", "data/loops_grid_fe3", 1), ("melodic", "data/melodic_fe3", 1),
+          ("rendered", "data/features4_fe3", 1), ("songs", "data/songs_all_fe3", 1),
+          ("non-music", "data/noise_fe3", 0), ("silence", "data/noise_fe3", -1)]
 
 
 def main():

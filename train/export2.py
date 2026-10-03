@@ -30,10 +30,10 @@ from frontend.fe import BLOCK_SAMPLES, SAMPLE_RATE
 from . import closedloop, compare, data, evaluate, gridmetrics, mres, scoreboard
 from .export import context_spec, to_tflite
 
-CALIB = ("data/features4_mel", "data/noise_mel", "data/loops_grid_mel", "data/melodic_mel",
-         "data/songs_all_mel", "data/playlists_all_mel")
-TEST = {"clips": "data/features4_mel", "loops": "data/loops_mel", "melodic": "data/melodic_mel",
-        "loops_grid": "data/loops_grid_mel", "melodic_grid": "data/melodic_grid_mel"}
+CALIB = ("data/features4_fe3", "data/noise_fe3", "data/loops_grid_fe3", "data/melodic_fe3",
+         "data/songs_all_fe3", "data/playlists_all_fe3")
+TEST = {"clips": "data/features4_fe3", "loops": "data/loops_fe3", "melodic": "data/melodic_fe3",
+        "loops_grid": "data/loops_grid_fe3", "melodic_grid": "data/melodic_grid_fe3"}
 HIT_CLASSES = ["kick", "snare", "hihat", "none"]
 
 
@@ -179,7 +179,7 @@ def device_pcm(song_id, start_s, seconds):
     m = decode(SONGS / index[song_id]["audio"])
     m = m[int(start_s * SAMPLE_RATE): int((start_s + seconds) * SAMPLE_RATE)]
     rng = np.random.default_rng(1)
-    y = augment.finish(augment.apply_ir(m), 240, rng, dbfs=float(np.mean(render.LEVEL_DBFS)))
+    y = augment.finish(augment.apply_ir(m, rng), 240, rng, dbfs=float(np.mean(render.LEVEL_DBFS)))
     return (y * 32767.0).astype(np.int16)
 
 
@@ -277,7 +277,7 @@ def main():
     (a.out / "golden" / "golden.json").write_text(json.dumps(g))
 
     commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    meta_fe = data.meta(Path("data/features4_mel"))
+    meta_fe = data.meta(Path("data/features4_fe3"))
 
     def q(t):
         s, z = t.q_in

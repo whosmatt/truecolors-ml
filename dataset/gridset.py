@@ -85,7 +85,7 @@ def take(row: dict, rng: np.random.Generator, notch: int, hicut: bool = True):
     # The grid anchor is measured from the clean file, not assumed to be sample 0.
     phase0 = (row.get("grid_phase", 0.0) - off) % beat
 
-    wet = augment.apply_ir(tiled)
+    wet = augment.apply_ir(tiled, rng)
     dbfs = float(rng.uniform(*render.LEVEL_DBFS))
     y = augment.finish(wet, notch, rng, dbfs=dbfs)
     X = features.featurise((y * 32767.0).astype(np.int16), hicut=hicut)
@@ -122,7 +122,7 @@ def main():
 
     for i, row in enumerate(pool):
         rng = np.random.default_rng(row["file_id"])
-        notch = a.notch or features.NOTCH_HZ[i % len(features.NOTCH_HZ)]
+        notch = a.notch or features.NOTCH_CYCLE[i % len(features.NOTCH_CYCLE)]
         r = take(row, rng, notch)
         if r is None:
             continue

@@ -2,100 +2,101 @@
 
 The chain is physical, and the order matters:
 
-    dry mix -> speaker/room/mic IR -> + coil whine -> ADC
+    dry mix -> room IR -> device mic -> level -> + device self-noise -> ADC
 
-The whine is added *after* the IR because the whine captures were recorded
-through the same mic, so the mic's response is already in them.
+Room and mic are one precomputed kernel per room channel (dataset/roomir.py),
+drawn per take. The self-noise is added *after* the kernel because it was
+recorded through the same mic, so the mic's response is already in it.
 
-Whine is injected at its measured absolute level, not relative to the music. The
-coil is a fixed physical source: it does not get quieter when the music does,
-which is exactly why it matters most at low SPL.
+Self-noise is injected at its measured absolute level, not relative to the
+music. Coil whine and the fan are fixed physical sources: they do not get
+quieter when the music does, which is exactly why they matter most at low SPL.
 """
 
-import json
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-import soundfile as sf
-import soxr
 
 SR = 48000
-CAPTURES = Path("/mnt/c/Users/matt/truecolors/captures")
-IR_PATH = Path("data/ir/mic_preliminary.wav")
+KERNELS = Path("data/ir/kernels.npz")
+# Controlled whine captures 2026-10-03 (after the hardware fix): slow RGB sweeps
+# and the rainbow effect, laser on, fan running as it does in use.
+SELF_NOISE = Path("data/whine/2026-10-03")
+WHINE = {
+    120: ("sweep120_a", "sweep120_b", "sweep120_c", "sweep120_d", "rainbow120"),
+    240: ("sweep240_a", "sweep240_b"),
+    480: ("sweep480_a", "sweep480_b"),
+}
+QUIET = ("quiet_pre", "quiet_post")  # laser off: mic floor and fan
+XFADE = int(0.05 * SR)  # joins between capture pieces
 
 
-@lru_cache(maxsize=4)
-def load_ir(path: str = str(IR_PATH)) -> np.ndarray:
-    """IR trimmed to start at the direct sound.
+@lru_cache(maxsize=1)
+def _kernels() -> tuple[np.ndarray, ...]:
+    z = np.load(KERNELS)
+    d, o = z["data"], z["offsets"]
+    return tuple(d[o[i] : o[i + 1]] for i in range(len(o) - 1))
 
-    The stored IR keeps 5 ms of pre-roll to hold deconvolution artefacts.
-    Convolving with that pre-roll delays every onset by 4.27 ms (measured), so
-    it is cut here: trimmed at the peak the shift is exactly zero.
+
+def n_kernels() -> int:
+    return len(_kernels())
+
+
+@lru_cache(maxsize=None)
+def _capture(name: str) -> np.ndarray:
+    """A raw miccap capture, DC removed, absolute scale kept (1.0 = full scale)."""
+    x = np.fromfile(SELF_NOISE / f"{name}.raw", dtype="<i2").astype(np.float64) / 32768.0
+    return (x - x.mean()).astype(np.float32)
+
+
+def bed(notch_hz: int | None, n: int, rng: np.random.Generator) -> np.ndarray:
+    """n samples of real self-noise: random pieces of the captures for this PWM
+    setting (None: laser off), joined with short crossfades."""
+    names = QUIET if notch_hz is None else WHINE[notch_hz]
+    out = np.zeros(n, np.float32)
+    pos = 0
+    while pos < n:
+        c = _capture(names[int(rng.integers(len(names)))])
+        L = min(len(c), n - pos + XFADE)
+        s = int(rng.integers(len(c) - L + 1))
+        seg = c[s : s + L].copy()
+        if pos > 0:
+            r = np.linspace(0.0, 1.0, min(XFADE, L), dtype=np.float32)
+            seg[: len(r)] *= np.sqrt(r)
+            out[pos - len(r) : pos] *= np.sqrt(r[::-1])
+            start = pos - len(r)
+        else:
+            start = 0
+        end = min(start + L, n)
+        out[start:end] += seg[: end - start]
+        pos = end
+    return out
+
+
+@lru_cache(maxsize=32)
+def _kernel_spectrum(idx: int, nfft: int) -> np.ndarray:
+    return np.fft.rfft(_kernels()[idx], nfft).astype(np.complex64)
+
+
+def apply_ir(x: np.ndarray, rng: np.random.Generator, kernel: int | None = None) -> np.ndarray:
+    """Convolve with one room+mic kernel, drawn from `rng` unless given;
+    preserves length and onset timing (kernels start at the direct sound).
+
+    Overlap-add in the frequency domain: direct convolution against a 1 s kernel
+    would dominate the whole build.
     """
-    ir, sr = sf.read(path, dtype="float64")
-    if sr != SR:
-        ir = soxr.resample(ir, sr, SR, quality="VHQ")
-    ir = ir[int(np.argmax(np.abs(ir))) :]
-    return (ir / np.abs(ir).max()).astype(np.float32)
-
-
-@lru_cache(maxsize=8)
-def load_whine(notch_hz: int, captures: str = str(CAPTURES)) -> np.ndarray:
-    """A real 10 s capture of the device's own coil whine at this PWM setting.
-
-    Real capture rather than synthesised comb lines: it carries the exact comb,
-    the 5760 Hz mechanical resonance every setting excites, and the mic's own
-    noise floor, with no synthesis error. Absolute scale is preserved.
-    """
-    p = Path(captures) / f"whine_{notch_hz}.wav"
-    x, sr = sf.read(p, dtype="float64")
-    x = x - x.mean()  # raw captures carry the mic's ~1057 LSB DC offset
-    if abs(sr - SR) > 0.5:
-        x = soxr.resample(x, sr, SR, quality="VHQ")
-    return x.astype(np.float32)
-
-
-@lru_cache(maxsize=2)
-def load_floor(captures: str = str(CAPTURES)) -> np.ndarray:
-    """Laser-off quiet capture: the mic's floor with no whine."""
-    x, sr = sf.read(Path(captures) / "quiet_laser_off.wav", dtype="float64")
-    x = x - x.mean()
-    if abs(sr - SR) > 0.5:
-        x = soxr.resample(x, sr, SR, quality="VHQ")
-    return x.astype(np.float32)
-
-
-@lru_cache(maxsize=4)
-def _kernel_spectrum(key: tuple, nfft: int) -> np.ndarray:
-    """rfft of the IR, cached: the same kernel is reused for every take."""
-    return np.fft.rfft(_KERNELS[key], nfft)
-
-
-_KERNELS: dict[tuple, np.ndarray] = {}
-
-
-def apply_ir(x: np.ndarray, ir: np.ndarray | None = None) -> np.ndarray:
-    """Convolve, preserving length and onset timing.
-
-    Overlap-add in the frequency domain. Direct convolution of a 12 s take
-    against a 24k-tap IR is 14 G MAC and dominated the whole build; this is the
-    same arithmetic at O(n log m), with the kernel's spectrum computed once and
-    reused across every take.
-    """
-    k = load_ir() if ir is None else ir
+    idx = int(rng.integers(n_kernels())) if kernel is None else kernel
+    k = _kernels()[idx]
     n, m = len(x), len(k)
-    if m == 0 or n == 0:
+    if n == 0:
         return np.asarray(x, dtype=np.float32)
     if n < 4 * m:  # short takes: the transform costs more than it saves
         return np.convolve(x, k)[:n].astype(np.float32)
 
     nfft = 1 << max(11, (2 * m - 1).bit_length())
     hop = nfft - m + 1
-    key = (k.shape[0], float(k[0]), float(k[-1]), float(k.sum()))
-    _KERNELS.setdefault(key, k)
-    K = _kernel_spectrum(key, nfft)
-
+    K = _kernel_spectrum(idx, nfft)
     out = np.zeros(n + m - 1, dtype=np.float64)
     for i in range(0, n, hop):
         seg = x[i : i + hop]
@@ -110,22 +111,10 @@ def add_noise(
 ) -> np.ndarray:
     """Add the device's own noise at its captured absolute level.
 
-    `notch_hz` None means laser off, which still has the mic's floor.
-    `gain` scales the whine only, for ablations; 1.0 is as measured.
+    `notch_hz` None means laser off, which still has the mic floor and the fan.
+    `gain` scales the noise only, for ablations; 1.0 is as measured.
     """
-    bed = load_floor() if notch_hz is None else load_whine(notch_hz)
-    if bed.size == 0:
-        return x
-    if len(x) > bed.size:
-        bed = np.tile(bed, int(np.ceil(len(x) / bed.size)) + 1)
-    start = int(rng.integers(bed.size - len(x))) if bed.size > len(x) else 0
-    return (x + bed[start : start + len(x)] * gain).astype(np.float32)
-
-
-def whine_lines(captures: str = str(CAPTURES)) -> dict[int, list[tuple[float, float]]]:
-    """Measured comb lines, {pwm_hz: [(freq_hz, dB over quiet floor)]}."""
-    raw = json.loads((Path(captures) / "whine_lines.json").read_text())
-    return {int(k): [(float(f), float(d)) for f, d in v] for k, v in raw.items()}
+    return (x + bed(notch_hz, len(x), rng) * gain).astype(np.float32)
 
 
 def finish(
@@ -151,4 +140,4 @@ def process(
     x: np.ndarray, notch_hz: int, rng: np.random.Generator, *, dbfs: float
 ) -> np.ndarray:
     """Full chain at a chosen playback level, for one-off use."""
-    return finish(apply_ir(x), notch_hz, rng, dbfs=dbfs)
+    return finish(apply_ir(x, rng), notch_hz, rng, dbfs=dbfs)

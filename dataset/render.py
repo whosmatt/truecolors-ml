@@ -36,7 +36,7 @@ KEEP_S = 8.0        # usable audio kept after the settle window
 # identically from -3 to -30 dBFS. Below about -45 dBFS the flux gate closes
 # entirely, which is the front end's room-silence behaviour, so takes are drawn
 # from a range that spans loud down to nearly-gated. (measured 2026-09-19)
-LEVEL_DBFS = (-40.0, -6.0)
+LEVEL_DBFS = (-55.0, -6.0)  # casual listening measured at -41 dBFS peak (2026-10-03)
 
 
 def _load(path: str) -> np.ndarray | None:

@@ -84,11 +84,11 @@ I can't share the dataset due to license restrictions.
 
 ### Preprocessing
 
-I recorded an IR of the target mic against a calibrated speaker inside a typical room, which is then applied to the training data.
-This will do for now, but a future plan is to split the mic response from the room response and apply a variety of room IRs for augmentation.  
+I recorded an IR of the target mic against a calibrated reference mic in an anechoic chamber. During training, this IR is applied in addition to a variety of room IRs (small and medium room IRs from Ableton Live Convolution Reverb) for augmentation.  
 Coil whine is included via recordings that are mixed into the training samples. They contain the mic noise floor too.  
 Silent attack is stripped from samples to reduce onset variance.  
-The entire on-device preprocessing chain is compiled, wrapped into a python module and applied to the training data verbatim, this includes the lowpass filter. 
+The entire on-device preprocessing chain is compiled, wrapped into a python module and applied to the training data verbatim, this includes the lowpass filter.  
+The model gets training data that is very close to what it will receive on device.  
 
 ### Summary
 
@@ -128,6 +128,6 @@ Due to the small music set, performance on real music is measured with 5x cross-
 Median recovery time on tempo/track changes is 5.3s.  
 While the frontend comb filter was dropped (partially because the coil whine was greatly reduced in hardware), removing or changing the lowpass degraded beat prediction performance in all testing so far.  
 Beat detection performance is rock solid on 4-on-the-floor genres and performs reliably on other common rhythmic patters. It does work on drum breaks to some extent but not as reliably.  
-Music detection is not performing well yet.
+Music detection is not performing well yet.  
 
 Wider models and longer context were retested with real music but did not bring a clear improvement. Causal TCN, GRU, as well as sparse context max-pooling and peak-picking were tested but did not outperform the current approach. See [6-context-and-sequence](./results/6-context-and-sequence/README.md).

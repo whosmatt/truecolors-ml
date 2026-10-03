@@ -68,7 +68,8 @@ def sweep(spec: SweepSpec = SweepSpec()) -> tuple[np.ndarray, np.ndarray]:
     # Farina inverse: time-reverse and apply -6 dB/octave, which flattens the
     # sweep's own 1/f energy distribution.
     inv = x[::-1] * np.exp(-t * k / spec.duration)
-    inv /= np.abs(np.fft.rfft(np.convolve(x, inv, mode="full"))).max() or 1.0
+    nfft = 1 << (2 * n - 2).bit_length()
+    inv /= np.abs(np.fft.rfft(x, nfft) * np.fft.rfft(inv, nfft)).max() or 1.0
     return x.astype(np.float64), inv.astype(np.float64)
 
 
